@@ -1,4 +1,4 @@
-name: JPro Engine
+name: JPro Engine Cloud
 
 on:
   workflow_dispatch:
