@@ -1,0 +1,404 @@
+{
+  "status": "READY",
+  "generated_at_utc": "2026-09-21T19:51:06.038478+00:00",
+  "target_date": "2026-09-21",
+  "source": "nflverse via nflreadpy",
+  "games": [
+    {
+      "game_id": "2026_02_NYG_LA",
+      "date": "2026-09-21",
+      "away_team": "NYG",
+      "home_team": "LA",
+      "gametime": "20:15",
+      "weekday": "Monday",
+      "location": "Home",
+      "roof": "dome",
+      "surface": "matrixturf",
+      "temp": null,
+      "wind": null,
+      "spread_line": 6.5,
+      "total_line": 47.5
+    }
+  ],
+  "teams": [
+    "LA",
+    "NYG"
+  ],
+  "players": [
+    {
+      "player_id": "00-0031345",
+      "player": "Jimmy Garoppolo",
+      "position": "QB",
+      "team": "LA",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0026498",
+      "player": "Matthew Stafford",
+      "position": "QB",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039107",
+      "player": "Stetson Bennett",
+      "position": "QB",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039738",
+      "player": "Blake Corum",
+      "position": "RB",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039703",
+      "player": "Cody Schrader",
+      "position": "RB",
+      "team": "LA",
+      "latest_data_season": 2024,
+      "latest_data_week": 20
+    },
+    {
+      "player_id": "00-0040692",
+      "player": "Jarquez Hunter",
+      "position": "RB",
+      "team": "LA",
+      "latest_data_season": 2025,
+      "latest_data_week": 19
+    },
+    {
+      "player_id": "00-0037840",
+      "player": "Kyren Williams",
+      "position": "RB",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0037557",
+      "player": "Ronnie Rivers",
+      "position": "RB",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0036244",
+      "player": "Colby Parkinson",
+      "position": "TE",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039074",
+      "player": "Davis Allen",
+      "position": "TE",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0040737",
+      "player": "Terrance Ferguson",
+      "position": "TE",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0033110",
+      "player": "Tyler Higbee",
+      "position": "TE",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0031381",
+      "player": "Davante Adams",
+      "position": "WR",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039751",
+      "player": "Jordan Whittington",
+      "position": "WR",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0040590",
+      "player": "Konata Mumpfield",
+      "position": "WR",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039075",
+      "player": "Puka Nacua",
+      "position": "WR",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0036849",
+      "player": "Tutu Atwell",
+      "position": "WR",
+      "team": "LA",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0038359",
+      "player": "Xavier Smith",
+      "position": "WR",
+      "team": "LA",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0031503",
+      "player": "Jameis Winston",
+      "position": "QB",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 15
+    },
+    {
+      "player_id": "00-0040691",
+      "player": "Jaxson Dart",
+      "position": "QB",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0029263",
+      "player": "Russell Wilson",
+      "position": "QB",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 10
+    },
+    {
+      "player_id": "00-0034177",
+      "player": "Tim Boyle",
+      "position": "QB",
+      "team": "NYG",
+      "latest_data_season": 2024,
+      "latest_data_week": 15
+    },
+    {
+      "player_id": "00-0038476",
+      "player": "Tommy DeVito",
+      "position": "QB",
+      "team": "NYG",
+      "latest_data_season": 2024,
+      "latest_data_week": 15
+    },
+    {
+      "player_id": "00-0040715",
+      "player": "Cam Skattebo",
+      "position": "RB",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039230",
+      "player": "Dante Miller",
+      "position": "RB",
+      "team": "NYG",
+      "latest_data_season": 2024,
+      "latest_data_week": 6
+    },
+    {
+      "player_id": "00-0035250",
+      "player": "Devin Singletary",
+      "position": "RB",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0038396",
+      "player": "Eric Gray",
+      "position": "RB",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 12
+    },
+    {
+      "player_id": "00-0033376",
+      "player": "Patrick Ricard",
+      "position": "RB",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039384",
+      "player": "Tyrone Tracy Jr.",
+      "position": "RB",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0031484",
+      "player": "Chris Manhertz",
+      "position": "TE",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0037838",
+      "player": "Isaiah Likely",
+      "position": "TE",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039847",
+      "player": "Theo Johnson",
+      "position": "TE",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0040225",
+      "player": "Thomas Fidone II",
+      "position": "TE",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 7
+    },
+    {
+      "player_id": "00-0040432",
+      "player": "Beaux Collins",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 8
+    },
+    {
+      "player_id": "00-0034419",
+      "player": "Braxton Berrios",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0038477",
+      "player": "Bryce Ford-Wheaton",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2024,
+      "latest_data_week": 14
+    },
+    {
+      "player_id": "00-0040431",
+      "player": "Dalen Cambre",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0035535",
+      "player": "Darius Slayton",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0036309",
+      "player": "Darnell Mooney",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0035645",
+      "player": "Gunner Olszewski",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0036635",
+      "player": "Ihmir Smith-Marsette",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2024,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0036165",
+      "player": "Isaiah Hodgins",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 18
+    },
+    {
+      "player_id": "00-0038938",
+      "player": "Jalin Hyatt",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 15
+    },
+    {
+      "player_id": "00-0041042",
+      "player": "Malachi Fields",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0039337",
+      "player": "Malik Nabers",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2026,
+      "latest_data_week": 1
+    },
+    {
+      "player_id": "00-0034407",
+      "player": "Ray-Ray McCloud",
+      "position": "WR",
+      "team": "NYG",
+      "latest_data_season": 2025,
+      "latest_data_week": 10
+    }
+  ],
+  "gates": {
+    "schedule_found": true,
+    "players_found": true,
+    "current_2026_player_data": true,
+    "sportsbook_lines_connected": false,
+    "predictions_unlocked": false
+  }
+}
