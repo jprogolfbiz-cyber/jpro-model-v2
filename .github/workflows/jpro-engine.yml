@@ -22,25 +22,27 @@ jobs:
       - name: Install JPro tools
         run: |
           python -m pip install --upgrade pip
-          pip install nflreadpy polars pyarrow scikit-learn numpy
+          pip install nflreadpy polars pyarrow scikit-learn numpy joblib
 
-      - name: Build JPro training data
+      - name: Train JPro models
         run: |
-          mkdir -p data
+          mkdir -p data models
 
           python - <<'PY'
           import json
-          from datetime import datetime, timezone
+          import joblib
+          import numpy as np
           import nflreadpy as nfl
           import polars as pl
 
-          print("JPRO TRAINING PIPELINE STARTING")
+          from datetime import datetime, timezone
+          from sklearn.linear_model import Ridge
+          from sklearn.metrics import mean_absolute_error, mean_squared_error
+
+          print("JPRO MODEL TRAINING STARTING")
 
           seasons = [2023, 2024, 2025]
           df = nfl.load_player_stats(seasons)
-
-          print(f"RAW ROWS: {df.height}")
-          print(f"RAW COLUMNS: {len(df.columns)}")
 
           required = [
               "player_id",
@@ -59,11 +61,9 @@ jobs:
           ]
 
           missing = [c for c in required if c not in df.columns]
-          print("MISSING REQUIRED COLUMNS:", missing)
-
           if missing:
               raise RuntimeError(
-                  "Schema audit failed. Missing: " + ", ".join(missing)
+                  "Missing required columns: " + ", ".join(missing)
               )
 
           df = df.sort(["player_id", "season", "week"])
@@ -107,49 +107,129 @@ jobs:
 
               feature_names.extend([lag1, avg3, avg5])
 
-          df = df.with_columns(
-              (
-                  pl.col("rushing_tds") +
-                  pl.col("receiving_tds")
-              ).alias("total_tds")
-          )
-
           usable = df.drop_nulls(feature_names)
 
-          print(f"LEAKAGE-SAFE TRAINING ROWS: {usable.height}")
-          print(f"FEATURES CREATED: {len(feature_names)}")
+          print(f"TRAINING TABLE ROWS: {usable.height}")
+          print(f"FEATURE COUNT: {len(feature_names)}")
 
-          if usable.height <= 0:
-              raise RuntimeError("No usable training rows created.")
+          # Chronological split:
+          # 2023-24 = training
+          # 2025 = completely unseen validation season
+          train = usable.filter(pl.col("season") < 2025)
+          test = usable.filter(pl.col("season") == 2025)
 
-          audit = {
+          print(f"TRAIN ROWS: {train.height}")
+          print(f"UNSEEN TEST ROWS: {test.height}")
+
+          if train.height == 0 or test.height == 0:
+              raise RuntimeError("Chronological train/test split failed.")
+
+          X_train = train.select(feature_names).to_numpy()
+          X_test = test.select(feature_names).to_numpy()
+
+          targets = {
+              "passing_yards": ["QB"],
+              "rushing_yards": ["QB", "RB"],
+              "receiving_yards": ["WR", "TE", "RB"],
+              "receptions": ["WR", "TE", "RB"]
+          }
+
+          results = {}
+
+          for target, positions in targets.items():
+
+              train_mask = train["position"].is_in(positions).to_numpy()
+              test_mask = test["position"].is_in(positions).to_numpy()
+
+              Xtr = X_train[train_mask]
+              Xte = X_test[test_mask]
+
+              ytr = train.filter(
+                  pl.col("position").is_in(positions)
+              )[target].to_numpy()
+
+              yte = test.filter(
+                  pl.col("position").is_in(positions)
+              )[target].to_numpy()
+
+              if len(ytr) < 100 or len(yte) < 50:
+                  print(f"SKIPPING {target}: insufficient rows")
+                  continue
+
+              model = Ridge(alpha=10.0)
+              model.fit(Xtr, ytr)
+
+              pred = model.predict(Xte)
+
+              mae = float(mean_absolute_error(yte, pred))
+              rmse = float(np.sqrt(mean_squared_error(yte, pred)))
+
+              baseline = np.full(len(yte), np.mean(ytr))
+              baseline_mae = float(
+                  mean_absolute_error(yte, baseline)
+              )
+
+              improvement = float(
+                  (baseline_mae - mae) / baseline_mae * 100
+              )
+
+              model_path = f"models/{target}.joblib"
+              joblib.dump(
+                  {
+                      "model": model,
+                      "features": feature_names,
+                      "target": target,
+                      "positions": positions
+                  },
+                  model_path
+              )
+
+              results[target] = {
+                  "train_rows": int(len(ytr)),
+                  "test_rows": int(len(yte)),
+                  "mae": round(mae, 3),
+                  "rmse": round(rmse, 3),
+                  "baseline_mae": round(baseline_mae, 3),
+                  "baseline_improvement_pct": round(improvement, 2)
+              }
+
+              print("")
+              print(f"MODEL: {target}")
+              print(f"TRAIN ROWS: {len(ytr)}")
+              print(f"UNSEEN TEST ROWS: {len(yte)}")
+              print(f"MAE: {mae:.3f}")
+              print(f"RMSE: {rmse:.3f}")
+              print(f"BASELINE MAE: {baseline_mae:.3f}")
+              print(f"IMPROVEMENT VS BASELINE: {improvement:.2f}%")
+
+          if not results:
+              raise RuntimeError("No JPro models were trained.")
+
+          report = {
               "engine": "JPro Cloud Engine",
-              "status": "TRAINING_DATA_READY",
+              "status": "MODELS_TRAINED_VALIDATION_PENDING",
               "source": "nflverse via nflreadpy",
-              "seasons": seasons,
-              "raw_rows": df.height,
-              "raw_columns": len(df.columns),
-              "training_rows": usable.height,
-              "features_created": len(feature_names),
-              "feature_names": feature_names,
-              "schema_check": "PASS",
-              "leakage_protection": "SHIFTED_PRIOR_GAMES_ONLY",
-              "models_trained": False,
+              "training_seasons": [2023, 2024],
+              "unseen_test_season": 2025,
+              "features": len(feature_names),
+              "models": results,
               "predictions_unlocked": False,
               "updated_at": datetime.now(timezone.utc).isoformat()
           }
 
-          with open("data/training-audit.json", "w") as f:
-              json.dump(audit, f, indent=2)
+          with open("data/model-training-report.json", "w") as f:
+              json.dump(report, f, indent=2)
 
-          print("JPRO TRAINING DATA READY")
+          print("")
+          print("JPRO MODEL TRAINING COMPLETE")
+          print("PREDICTIONS REMAIN LOCKED UNTIL VALIDATION")
           PY
 
-      - name: Show training audit
-        run: cat data/training-audit.json
+      - name: Show JPro model results
+        run: cat data/model-training-report.json
 
-      - name: Save JPro training audit
+      - name: Save JPro model results
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: training data schema fix"
-          file_pattern: data/training-audit.json
+          commit_message: "JPro: train first real models"
+          file_pattern: data/model-training-report.json
