@@ -1,8 +1,41 @@
 {
   "engine": "JPro Cloud Engine",
-  "cloud": "READY",
-  "python": "READY",
-  "nfl_data_tools": "READY",
-  "real_model_outputs": "LOCKED",
-  "updated_at": "2026-09-21T19:14:31.626867+00:00"
+  "status": "REAL_DATA_CONNECTED",
+  "source": "nflverse via nflreadpy",
+  "seasons_requested": [
+    2023,
+    2024,
+    2025
+  ],
+  "rows_downloaded": 57048,
+  "columns_found": 150,
+  "sample_columns": [
+    "player_id",
+    "player_name",
+    "player_display_name",
+    "position",
+    "position_group",
+    "headshot_url",
+    "season",
+    "week",
+    "season_type",
+    "game_id",
+    "team",
+    "opponent_team",
+    "completions",
+    "attempts",
+    "passing_yards",
+    "passing_tds",
+    "passing_interceptions",
+    "sacks_suffered",
+    "sack_yards_lost",
+    "sack_fumbles",
+    "sack_fumbles_lost",
+    "passing_air_yards",
+    "passing_yards_after_catch",
+    "passing_first_downs",
+    "passing_epa"
+  ],
+  "model_outputs": "LOCKED",
+  "updated_at": "2026-09-21T19:19:42.601428+00:00"
 }
