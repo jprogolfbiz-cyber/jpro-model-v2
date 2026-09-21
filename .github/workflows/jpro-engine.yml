@@ -61,6 +61,7 @@ jobs:
           ]
 
           missing = [c for c in required if c not in df.columns]
+
           if missing:
               raise RuntimeError(
                   "Missing required columns: " + ", ".join(missing)
@@ -105,27 +106,36 @@ jobs:
                   .alias(avg5)
               )
 
-              feature_names.extend([lag1, avg3, avg5])
+              feature_names.extend([
+                  lag1,
+                  avg3,
+                  avg5
+              ])
 
           usable = df.drop_nulls(feature_names)
 
           print(f"TRAINING TABLE ROWS: {usable.height}")
           print(f"FEATURE COUNT: {len(feature_names)}")
 
-          # Chronological split:
-          # 2023-24 = training
-          # 2025 = completely unseen validation season
-          train = usable.filter(pl.col("season") < 2025)
-          test = usable.filter(pl.col("season") == 2025)
+          # Chronological holdout:
+          # Train = 2023 + 2024
+          # Test = unseen 2025 season
+
+          train = usable.filter(
+              pl.col("season") < 2025
+          )
+
+          test = usable.filter(
+              pl.col("season") == 2025
+          )
 
           print(f"TRAIN ROWS: {train.height}")
           print(f"UNSEEN TEST ROWS: {test.height}")
 
           if train.height == 0 or test.height == 0:
-              raise RuntimeError("Chronological train/test split failed.")
-
-          X_train = train.select(feature_names).to_numpy()
-          X_test = test.select(feature_names).to_numpy()
+              raise RuntimeError(
+                  "Chronological train/test split failed."
+              )
 
           targets = {
               "passing_yards": ["QB"],
@@ -138,42 +148,122 @@ jobs:
 
           for target, positions in targets.items():
 
-              train_mask = train["position"].is_in(positions).to_numpy()
-              test_mask = test["position"].is_in(positions).to_numpy()
-
-              Xtr = X_train[train_mask]
-              Xte = X_test[test_mask]
-
-              ytr = train.filter(
+              train_target = train.filter(
                   pl.col("position").is_in(positions)
-              )[target].to_numpy()
+              )
 
-              yte = test.filter(
+              test_target = test.filter(
                   pl.col("position").is_in(positions)
-              )[target].to_numpy()
+              )
 
-              if len(ytr) < 100 or len(yte) < 50:
-                  print(f"SKIPPING {target}: insufficient rows")
+              print("")
+              print(f"PREPARING MODEL: {target}")
+              print(
+                  f"POSITION FILTER: {', '.join(positions)}"
+              )
+              print(
+                  f"TARGET TRAIN ROWS: {train_target.height}"
+              )
+              print(
+                  f"TARGET TEST ROWS: {test_target.height}"
+              )
+
+              if (
+                  train_target.height < 100
+                  or test_target.height < 50
+              ):
+                  print(
+                      f"SKIPPING {target}: insufficient rows"
+                  )
                   continue
 
+              Xtr = train_target.select(
+                  feature_names
+              ).to_numpy()
+
+              Xte = test_target.select(
+                  feature_names
+              ).to_numpy()
+
+              ytr = train_target.select(
+                  target
+              ).to_numpy().ravel()
+
+              yte = test_target.select(
+                  target
+              ).to_numpy().ravel()
+
+              Xtr = np.asarray(
+                  Xtr,
+                  dtype=np.float64
+              )
+
+              Xte = np.asarray(
+                  Xte,
+                  dtype=np.float64
+              )
+
+              ytr = np.asarray(
+                  ytr,
+                  dtype=np.float64
+              )
+
+              yte = np.asarray(
+                  yte,
+                  dtype=np.float64
+              )
+
               model = Ridge(alpha=10.0)
-              model.fit(Xtr, ytr)
+
+              model.fit(
+                  Xtr,
+                  ytr
+              )
 
               pred = model.predict(Xte)
 
-              mae = float(mean_absolute_error(yte, pred))
-              rmse = float(np.sqrt(mean_squared_error(yte, pred)))
+              mae = float(
+                  mean_absolute_error(
+                      yte,
+                      pred
+                  )
+              )
 
-              baseline = np.full(len(yte), np.mean(ytr))
+              rmse = float(
+                  np.sqrt(
+                      mean_squared_error(
+                          yte,
+                          pred
+                      )
+                  )
+              )
+
+              # Simple historical-mean baseline.
+              baseline_prediction = np.full(
+                  len(yte),
+                  np.mean(ytr),
+                  dtype=np.float64
+              )
+
               baseline_mae = float(
-                  mean_absolute_error(yte, baseline)
+                  mean_absolute_error(
+                      yte,
+                      baseline_prediction
+                  )
               )
 
               improvement = float(
-                  (baseline_mae - mae) / baseline_mae * 100
+                  (
+                      baseline_mae - mae
+                  )
+                  / baseline_mae
+                  * 100
               )
 
-              model_path = f"models/{target}.joblib"
+              model_path = (
+                  f"models/{target}.joblib"
+              )
+
               joblib.dump(
                   {
                       "model": model,
@@ -185,44 +275,112 @@ jobs:
               )
 
               results[target] = {
-                  "train_rows": int(len(ytr)),
-                  "test_rows": int(len(yte)),
+                  "train_rows": int(
+                      train_target.height
+                  ),
+                  "test_rows": int(
+                      test_target.height
+                  ),
                   "mae": round(mae, 3),
                   "rmse": round(rmse, 3),
-                  "baseline_mae": round(baseline_mae, 3),
-                  "baseline_improvement_pct": round(improvement, 2)
+                  "baseline_mae": round(
+                      baseline_mae,
+                      3
+                  ),
+                  "baseline_improvement_pct":
+                      round(improvement, 2)
               }
 
               print("")
               print(f"MODEL: {target}")
-              print(f"TRAIN ROWS: {len(ytr)}")
-              print(f"UNSEEN TEST ROWS: {len(yte)}")
-              print(f"MAE: {mae:.3f}")
-              print(f"RMSE: {rmse:.3f}")
-              print(f"BASELINE MAE: {baseline_mae:.3f}")
-              print(f"IMPROVEMENT VS BASELINE: {improvement:.2f}%")
+              print(
+                  f"TRAIN ROWS: "
+                  f"{train_target.height}"
+              )
+              print(
+                  f"UNSEEN TEST ROWS: "
+                  f"{test_target.height}"
+              )
+              print(
+                  f"MAE: {mae:.3f}"
+              )
+              print(
+                  f"RMSE: {rmse:.3f}"
+              )
+              print(
+                  f"BASELINE MAE: "
+                  f"{baseline_mae:.3f}"
+              )
+              print(
+                  "IMPROVEMENT VS BASELINE: "
+                  f"{improvement:.2f}%"
+              )
 
           if not results:
-              raise RuntimeError("No JPro models were trained.")
+              raise RuntimeError(
+                  "No JPro models were trained."
+              )
 
           report = {
               "engine": "JPro Cloud Engine",
-              "status": "MODELS_TRAINED_VALIDATION_PENDING",
-              "source": "nflverse via nflreadpy",
-              "training_seasons": [2023, 2024],
+              "status":
+                  "MODELS_TRAINED_VALIDATION_PENDING",
+              "source":
+                  "nflverse via nflreadpy",
+              "training_seasons": [
+                  2023,
+                  2024
+              ],
               "unseen_test_season": 2025,
-              "features": len(feature_names),
-              "models": results,
-              "predictions_unlocked": False,
-              "updated_at": datetime.now(timezone.utc).isoformat()
+              "training_table_rows":
+                  int(usable.height),
+              "feature_count":
+                  len(feature_names),
+              "models":
+                  results,
+              "predictions_unlocked":
+                  False,
+              "updated_at":
+                  datetime.now(
+                      timezone.utc
+                  ).isoformat()
           }
 
-          with open("data/model-training-report.json", "w") as f:
-              json.dump(report, f, indent=2)
+          with open(
+              "data/model-training-report.json",
+              "w"
+          ) as f:
+              json.dump(
+                  report,
+                  f,
+                  indent=2
+              )
 
           print("")
+          print("==============================")
           print("JPRO MODEL TRAINING COMPLETE")
-          print("PREDICTIONS REMAIN LOCKED UNTIL VALIDATION")
+          print("==============================")
+
+          for target, metrics in results.items():
+              print(
+                  target.upper(),
+                  "| MAE:",
+                  metrics["mae"],
+                  "| BASELINE:",
+                  metrics["baseline_mae"],
+                  "| IMPROVEMENT:",
+                  str(
+                      metrics[
+                          "baseline_improvement_pct"
+                      ]
+                  ) + "%"
+              )
+
+          print("")
+          print(
+              "PREDICTIONS REMAIN LOCKED "
+              "UNTIL VALIDATION"
+          )
           PY
 
       - name: Show JPro model results
