@@ -1,9 +1,369 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#050505"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"><link rel="manifest" href="./manifest.webmanifest"><title>JPro</title><style>
-*{box-sizing:border-box}body{margin:0;background:#050505;color:#fff;font-family:-apple-system,BlinkMacSystemFont,sans-serif}main{max-width:760px;margin:auto;padding:calc(18px + env(safe-area-inset-top)) 14px calc(90px + env(safe-area-inset-bottom))}header{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #222;padding-bottom:12px}header b{font-size:26px}.pill{font-size:10px;border:1px solid #444;border-radius:99px;padding:6px 9px}.hero,.card{background:#0d0d0d;border:1px solid #292929;border-radius:16px;padding:14px;margin:10px 0}small,p{font-size:10px;color:#777;line-height:1.5}.hero h1{font-size:25px;margin:5px 0}.teams{display:flex;justify-content:space-between;font-size:28px;font-weight:900;margin:18px 0}.gate{display:flex;justify-content:space-between;border-bottom:1px solid #222;padding:11px 0;font-size:12px}.gate:last-child{border:0}.ok{font-weight:800}.wait{color:#777;font-weight:800}.tabs{position:fixed;bottom:0;left:0;right:0;background:#080808;border-top:1px solid #222;display:flex;justify-content:space-around;padding:10px 3px calc(10px + env(safe-area-inset-bottom));font-size:9px}.tabs b{color:#fff}.tabs span{color:#666}.note{font-size:11px;font-weight:700}</style></head><body><main>
-<header><b>JPRO</b><span class="pill">iPHONE BUILD</span></header>
-<div class="hero"><small>TONIGHT MODE · WEEK 2</small><div class="teams"><span>NYG</span><span style="color:#555">@</span><span>LAR</span></div><h1>8:15 PM ET</h1><p>iPhone-first model console. Heavy data/model work belongs on the hosted backend — not your phone.</p></div>
-<div class="card"><b>ACTIVATION</b><div class="gate"><span>iPhone PWA shell</span><span class="ok">✓ READY</span></div><div class="gate"><span>Home-screen install</span><span class="ok">✓ READY</span></div><div class="gate"><span>Hosted backend</span><span class="wait">DEPLOY NEXT</span></div><div class="gate"><span>Real NFL ingestion</span><span class="wait">WAITING HOST</span></div><div class="gate"><span>Validated models</span><span class="wait">HOLD</span></div><div class="gate"><span>Real JPro outputs</span><span class="wait">LOCKED</span></div></div>
-<div class="card"><b>WHAT YOUR PHONE WILL DO</b><p class="note">Open JPro → choose a game → choose a player → enter/view a prop → see projection, 20K hit rate, fair odds, edge and explanation.</p></div>
-<div class="card"><b>NO FAKE PICKS</b><p>The interface stays locked until the hosted pipeline has genuine data and a model has passed validation. A rushed number that looks precise is worse than no number.</p></div>
-</main><nav class="tabs"><b>GAMES</b><span>MATCHUPS</span><span>TD BOARD</span><span>JPRO PICKS</span></nav>
-<script>if('serviceWorker'in navigator){navigator.serviceWorker.register('./sw.js')}</script></body></html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#050505">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <title>JPro Model V2</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      margin: 0;
+      background: #050505;
+      color: white;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display",
+                   "Segoe UI", sans-serif;
+    }
+
+    .app {
+      max-width: 760px;
+      margin: auto;
+      padding: 28px 18px 100px;
+    }
+
+    .top {
+      margin-bottom: 28px;
+    }
+
+    .brand {
+      font-size: 34px;
+      font-weight: 900;
+      letter-spacing: -1.5px;
+    }
+
+    .sub {
+      color: #8e8e93;
+      margin-top: 4px;
+      font-size: 14px;
+    }
+
+    .live {
+      display: inline-block;
+      margin-top: 12px;
+      border: 1px solid #2b2b2b;
+      background: #0d0d0d;
+      border-radius: 999px;
+      padding: 7px 11px;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .game {
+      border: 1px solid #252525;
+      background: #0d0d0d;
+      border-radius: 16px;
+      padding: 18px;
+      margin-bottom: 24px;
+    }
+
+    .game-label {
+      color: #8e8e93;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 1px;
+    }
+
+    .matchup {
+      font-size: 25px;
+      font-weight: 900;
+      margin-top: 8px;
+    }
+
+    .engine {
+      margin-top: 8px;
+      color: #aaa;
+      font-size: 13px;
+    }
+
+    .section-title {
+      font-size: 20px;
+      font-weight: 900;
+      margin: 26px 0 12px;
+    }
+
+    .card {
+      border: 1px solid #252525;
+      background: #0d0d0d;
+      border-radius: 16px;
+      padding: 17px;
+      margin-bottom: 11px;
+    }
+
+    .player {
+      font-size: 18px;
+      font-weight: 850;
+    }
+
+    .prop {
+      color: #9a9a9a;
+      font-size: 13px;
+      text-transform: uppercase;
+      margin-top: 3px;
+      letter-spacing: .5px;
+    }
+
+    .numbers {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 15px;
+    }
+
+    .metric {
+      background: #151515;
+      border: 1px solid #222;
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .metric-label {
+      color: #888;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: .5px;
+    }
+
+    .metric-value {
+      font-size: 24px;
+      font-weight: 900;
+      margin-top: 3px;
+    }
+
+    .status {
+      text-align: center;
+      padding: 35px 15px;
+      color: #8e8e93;
+    }
+
+    .error {
+      border: 1px solid #3a2525;
+      background: #140b0b;
+      border-radius: 16px;
+      padding: 18px;
+      line-height: 1.5;
+    }
+
+    .bottom {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: rgba(5,5,5,.94);
+      backdrop-filter: blur(18px);
+      border-top: 1px solid #222;
+      padding: 13px 20px calc(13px + env(safe-area-inset-bottom));
+    }
+
+    .bottom-inner {
+      max-width: 760px;
+      margin: auto;
+      display: flex;
+      justify-content: space-around;
+      color: #777;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .active {
+      color: white;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="app">
+
+  <div class="top">
+    <div class="brand">JPRO</div>
+    <div class="sub">THE JPRO MODEL V2</div>
+    <div class="live">20K SIMULATION ENGINE</div>
+  </div>
+
+  <div class="game">
+    <div class="game-label">CURRENT GAME</div>
+    <div class="matchup">NYG @ LA</div>
+    <div class="engine">
+      Model projections generated from current JPro pipeline
+    </div>
+  </div>
+
+  <div class="section-title">Player Projections</div>
+
+  <div id="results">
+    <div class="status">Loading JPro projections...</div>
+  </div>
+
+</div>
+
+<div class="bottom">
+  <div class="bottom-inner">
+    <div class="active">GAME</div>
+    <div>TOP MATCHUPS</div>
+    <div>TD BOARD</div>
+    <div>JPRO PICKS</div>
+  </div>
+</div>
+
+<script>
+async function loadJPro() {
+
+  const results = document.getElementById("results");
+
+  try {
+
+    const response = await fetch(
+      "./data/jpro-current-projections.json?v=" + Date.now(),
+      { cache: "no-store" }
+    );
+
+    if (!response.ok) {
+      throw new Error("Projection file not found");
+    }
+
+    const raw = await response.json();
+
+    /*
+      Accept several JSON layouts so the UI isn't tied
+      unnecessarily to one wrapper name.
+    */
+    let projections;
+
+    if (Array.isArray(raw)) {
+      projections = raw;
+    } else if (Array.isArray(raw.projections)) {
+      projections = raw.projections;
+    } else if (Array.isArray(raw.player_projections)) {
+      projections = raw.player_projections;
+    } else if (Array.isArray(raw.results)) {
+      projections = raw.results;
+    } else {
+      throw new Error("Projection JSON format not recognized");
+    }
+
+    if (!projections.length) {
+      throw new Error("No projections available");
+    }
+
+    results.innerHTML = "";
+
+    projections.forEach(item => {
+
+      const player =
+        item.player_name ??
+        item.player ??
+        item.name ??
+        "Player";
+
+      const prop =
+        item.prop ??
+        item.market ??
+        item.stat ??
+        item.target ??
+        "Projection";
+
+      const projection =
+        item.projection ??
+        item.projected ??
+        item.mean ??
+        item.proj;
+
+      const median =
+        item.median ??
+        item.p50 ??
+        projection;
+
+      if (projection === undefined || projection === null) {
+        return;
+      }
+
+      const card = document.createElement("div");
+      card.className = "card";
+
+      card.innerHTML = `
+        <div class="player">${escapeHTML(player)}</div>
+
+        <div class="prop">
+          ${escapeHTML(formatProp(prop))}
+        </div>
+
+        <div class="numbers">
+
+          <div class="metric">
+            <div class="metric-label">PROJECTION</div>
+            <div class="metric-value">
+              ${formatNumber(projection)}
+            </div>
+          </div>
+
+          <div class="metric">
+            <div class="metric-label">MEDIAN</div>
+            <div class="metric-value">
+              ${formatNumber(median)}
+            </div>
+          </div>
+
+        </div>
+      `;
+
+      results.appendChild(card);
+    });
+
+    if (!results.children.length) {
+      throw new Error("No usable projection rows found");
+    }
+
+  } catch (error) {
+
+    console.error(error);
+
+    results.innerHTML = `
+      <div class="error">
+        <strong>JPro data isn't displaying yet.</strong><br><br>
+        The app loaded correctly, but it couldn't read the
+        generated projection JSON.<br><br>
+        ${escapeHTML(error.message)}
+      </div>
+    `;
+  }
+}
+
+function formatProp(value) {
+  return String(value)
+    .replaceAll("_", " ")
+    .toUpperCase();
+}
+
+function formatNumber(value) {
+
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) {
+    return value;
+  }
+
+  return n.toFixed(1);
+}
+
+function escapeHTML(value) {
+
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+loadJPro();
+</script>
+
+</body>
+</html>
