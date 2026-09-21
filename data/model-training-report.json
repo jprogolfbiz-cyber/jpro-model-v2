@@ -1,0 +1,48 @@
+{
+  "engine": "JPro Cloud Engine",
+  "status": "MODELS_TRAINED_VALIDATION_PENDING",
+  "source": "nflverse via nflreadpy",
+  "training_seasons": [
+    2023,
+    2024
+  ],
+  "unseen_test_season": 2025,
+  "training_table_rows": 44514,
+  "feature_count": 24,
+  "models": {
+    "passing_yards": {
+      "train_rows": 969,
+      "test_rows": 613,
+      "mae": 70.094,
+      "rmse": 87.877,
+      "baseline_mae": 77.853,
+      "baseline_improvement_pct": 9.97
+    },
+    "rushing_yards": {
+      "train_rows": 3304,
+      "test_rows": 2084,
+      "mae": 17.463,
+      "rmse": 25.721,
+      "baseline_mae": 26.453,
+      "baseline_improvement_pct": 33.98
+    },
+    "receiving_yards": {
+      "train_rows": 8036,
+      "test_rows": 5081,
+      "mae": 16.705,
+      "rmse": 23.621,
+      "baseline_mae": 23.314,
+      "baseline_improvement_pct": 28.35
+    },
+    "receptions": {
+      "train_rows": 8036,
+      "test_rows": 5081,
+      "mae": 1.278,
+      "rmse": 1.71,
+      "baseline_mae": 1.816,
+      "baseline_improvement_pct": 29.62
+    }
+  },
+  "predictions_unlocked": false,
+  "updated_at": "2026-09-21T19:40:57.352988+00:00"
+}
