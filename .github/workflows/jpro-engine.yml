@@ -22,15 +22,14 @@ jobs:
       - name: Install JPro tools
         run: |
           python -m pip install --upgrade pip
-          pip install nflreadpy polars pyarrow scikit-learn numpy joblib
+          pip install nflreadpy polars pyarrow scikit-learn numpy
 
-      - name: Train JPro models
+      - name: Validate JPro models
         run: |
-          mkdir -p data models
+          mkdir -p data
 
           python - <<'PY'
           import json
-          import joblib
           import numpy as np
           import nflreadpy as nfl
           import polars as pl
@@ -39,14 +38,13 @@ jobs:
           from sklearn.linear_model import Ridge
           from sklearn.metrics import mean_absolute_error, mean_squared_error
 
-          print("JPRO MODEL TRAINING STARTING")
+          print("JPRO CHRONOLOGICAL VALIDATION STARTING")
 
           seasons = [2023, 2024, 2025]
           df = nfl.load_player_stats(seasons)
 
           required = [
               "player_id",
-              "player_display_name",
               "position",
               "season",
               "week",
@@ -114,28 +112,8 @@ jobs:
 
           usable = df.drop_nulls(feature_names)
 
-          print(f"TRAINING TABLE ROWS: {usable.height}")
-          print(f"FEATURE COUNT: {len(feature_names)}")
-
-          # Chronological holdout:
-          # Train = 2023 + 2024
-          # Test = unseen 2025 season
-
-          train = usable.filter(
-              pl.col("season") < 2025
-          )
-
-          test = usable.filter(
-              pl.col("season") == 2025
-          )
-
-          print(f"TRAIN ROWS: {train.height}")
-          print(f"UNSEEN TEST ROWS: {test.height}")
-
-          if train.height == 0 or test.height == 0:
-              raise RuntimeError(
-                  "Chronological train/test split failed."
-              )
+          print(f"USABLE ROWS: {usable.height}")
+          print(f"FEATURES: {len(feature_names)}")
 
           targets = {
               "passing_yards": ["QB"],
@@ -144,196 +122,348 @@ jobs:
               "receptions": ["WR", "TE", "RB"]
           }
 
+          # Each 2025 block is predicted using ONLY data
+          # available before that block.
+          folds = [
+              {
+                  "name": "2025_W1_W6",
+                  "test_start": 1,
+                  "test_end": 6
+              },
+              {
+                  "name": "2025_W7_W12",
+                  "test_start": 7,
+                  "test_end": 12
+              },
+              {
+                  "name": "2025_W13_PLUS",
+                  "test_start": 13,
+                  "test_end": 30
+              }
+          ]
+
           results = {}
 
           for target, positions in targets.items():
 
-              train_target = train.filter(
-                  pl.col("position").is_in(positions)
-              )
-
-              test_target = test.filter(
-                  pl.col("position").is_in(positions)
-              )
-
               print("")
-              print(f"PREPARING MODEL: {target}")
-              print(
-                  f"POSITION FILTER: {', '.join(positions)}"
-              )
-              print(
-                  f"TARGET TRAIN ROWS: {train_target.height}"
-              )
-              print(
-                  f"TARGET TEST ROWS: {test_target.height}"
-              )
+              print("=" * 50)
+              print(f"VALIDATING: {target}")
+              print("=" * 50)
 
-              if (
-                  train_target.height < 100
-                  or test_target.height < 50
-              ):
+              fold_results = []
+
+              all_actual = []
+              all_pred = []
+              all_baseline = []
+
+              for fold in folds:
+
+                  start = fold["test_start"]
+                  end = fold["test_end"]
+
+                  # Historical seasons always allowed.
+                  historical_train = usable.filter(
+                      pl.col("season") < 2025
+                  )
+
+                  # For later folds, allow only earlier
+                  # 2025 weeks into training.
+                  if start > 1:
+                      earlier_2025 = usable.filter(
+                          (pl.col("season") == 2025)
+                          & (pl.col("week") < start)
+                      )
+
+                      train = pl.concat(
+                          [historical_train, earlier_2025],
+                          how="vertical"
+                      )
+                  else:
+                      train = historical_train
+
+                  test = usable.filter(
+                      (pl.col("season") == 2025)
+                      & (pl.col("week") >= start)
+                      & (pl.col("week") <= end)
+                  )
+
+                  train_target = train.filter(
+                      pl.col("position").is_in(positions)
+                  )
+
+                  test_target = test.filter(
+                      pl.col("position").is_in(positions)
+                  )
+
+                  if (
+                      train_target.height < 100
+                      or test_target.height < 20
+                  ):
+                      print(
+                          f"{fold['name']} SKIPPED "
+                          "- insufficient rows"
+                      )
+                      continue
+
+                  Xtr = np.asarray(
+                      train_target
+                      .select(feature_names)
+                      .to_numpy(),
+                      dtype=np.float64
+                  )
+
+                  Xte = np.asarray(
+                      test_target
+                      .select(feature_names)
+                      .to_numpy(),
+                      dtype=np.float64
+                  )
+
+                  ytr = np.asarray(
+                      train_target
+                      .select(target)
+                      .to_numpy()
+                      .ravel(),
+                      dtype=np.float64
+                  )
+
+                  yte = np.asarray(
+                      test_target
+                      .select(target)
+                      .to_numpy()
+                      .ravel(),
+                      dtype=np.float64
+                  )
+
+                  model = Ridge(alpha=10.0)
+                  model.fit(Xtr, ytr)
+
+                  pred = model.predict(Xte)
+
+                  # Baseline uses only training data.
+                  baseline_value = float(np.mean(ytr))
+
+                  baseline_pred = np.full(
+                      len(yte),
+                      baseline_value,
+                      dtype=np.float64
+                  )
+
+                  mae = float(
+                      mean_absolute_error(yte, pred)
+                  )
+
+                  rmse = float(
+                      np.sqrt(
+                          mean_squared_error(yte, pred)
+                      )
+                  )
+
+                  baseline_mae = float(
+                      mean_absolute_error(
+                          yte,
+                          baseline_pred
+                      )
+                  )
+
+                  improvement = (
+                      (
+                          baseline_mae - mae
+                      )
+                      / baseline_mae
+                      * 100
+                      if baseline_mae > 0
+                      else 0.0
+                  )
+
+                  residuals = yte - pred
+
+                  residual_mean = float(
+                      np.mean(residuals)
+                  )
+
+                  residual_std = float(
+                      np.std(residuals)
+                  )
+
+                  fold_result = {
+                      "fold": fold["name"],
+                      "train_rows":
+                          int(train_target.height),
+                      "test_rows":
+                          int(test_target.height),
+                      "mae":
+                          round(mae, 3),
+                      "rmse":
+                          round(rmse, 3),
+                      "baseline_mae":
+                          round(baseline_mae, 3),
+                      "improvement_pct":
+                          round(improvement, 2),
+                      "residual_mean":
+                          round(residual_mean, 3),
+                      "residual_std":
+                          round(residual_std, 3)
+                  }
+
+                  fold_results.append(fold_result)
+
+                  all_actual.extend(yte.tolist())
+                  all_pred.extend(pred.tolist())
+                  all_baseline.extend(
+                      baseline_pred.tolist()
+                  )
+
+                  print("")
+                  print(f"FOLD: {fold['name']}")
                   print(
-                      f"SKIPPING {target}: insufficient rows"
+                      f"TEST ROWS: "
+                      f"{test_target.height}"
+                  )
+                  print(f"MAE: {mae:.3f}")
+                  print(
+                      f"BASELINE MAE: "
+                      f"{baseline_mae:.3f}"
+                  )
+                  print(
+                      "IMPROVEMENT: "
+                      f"{improvement:.2f}%"
+                  )
+                  print(
+                      "RESIDUAL MEAN: "
+                      f"{residual_mean:.3f}"
+                  )
+                  print(
+                      "RESIDUAL STD: "
+                      f"{residual_std:.3f}"
+                  )
+
+              if not fold_results:
+                  print(
+                      f"NO VALID FOLDS FOR {target}"
                   )
                   continue
 
-              Xtr = train_target.select(
-                  feature_names
-              ).to_numpy()
-
-              Xte = test_target.select(
-                  feature_names
-              ).to_numpy()
-
-              ytr = train_target.select(
-                  target
-              ).to_numpy().ravel()
-
-              yte = test_target.select(
-                  target
-              ).to_numpy().ravel()
-
-              Xtr = np.asarray(
-                  Xtr,
+              actual = np.asarray(
+                  all_actual,
                   dtype=np.float64
               )
 
-              Xte = np.asarray(
-                  Xte,
+              predictions = np.asarray(
+                  all_pred,
                   dtype=np.float64
               )
 
-              ytr = np.asarray(
-                  ytr,
+              baselines = np.asarray(
+                  all_baseline,
                   dtype=np.float64
               )
 
-              yte = np.asarray(
-                  yte,
-                  dtype=np.float64
-              )
-
-              model = Ridge(alpha=10.0)
-
-              model.fit(
-                  Xtr,
-                  ytr
-              )
-
-              pred = model.predict(Xte)
-
-              mae = float(
+              overall_mae = float(
                   mean_absolute_error(
-                      yte,
-                      pred
+                      actual,
+                      predictions
                   )
               )
 
-              rmse = float(
+              overall_rmse = float(
                   np.sqrt(
                       mean_squared_error(
-                          yte,
-                          pred
+                          actual,
+                          predictions
                       )
                   )
               )
 
-              # Simple historical-mean baseline.
-              baseline_prediction = np.full(
-                  len(yte),
-                  np.mean(ytr),
-                  dtype=np.float64
-              )
-
-              baseline_mae = float(
+              overall_baseline_mae = float(
                   mean_absolute_error(
-                      yte,
-                      baseline_prediction
+                      actual,
+                      baselines
                   )
               )
 
-              improvement = float(
+              overall_improvement = (
                   (
-                      baseline_mae - mae
+                      overall_baseline_mae
+                      - overall_mae
                   )
-                  / baseline_mae
+                  / overall_baseline_mae
                   * 100
+                  if overall_baseline_mae > 0
+                  else 0.0
               )
 
-              model_path = (
-                  f"models/{target}.joblib"
+              residuals = actual - predictions
+
+              overall_residual_mean = float(
+                  np.mean(residuals)
               )
 
-              joblib.dump(
-                  {
-                      "model": model,
-                      "features": feature_names,
-                      "target": target,
-                      "positions": positions
-                  },
-                  model_path
+              overall_residual_std = float(
+                  np.std(residuals)
+              )
+
+              positive_folds = sum(
+                  1
+                  for f in fold_results
+                  if f["improvement_pct"] > 0
+              )
+
+              stable = (
+                  positive_folds
+                  == len(fold_results)
               )
 
               results[target] = {
-                  "train_rows": int(
-                      train_target.height
-                  ),
-                  "test_rows": int(
-                      test_target.height
-                  ),
-                  "mae": round(mae, 3),
-                  "rmse": round(rmse, 3),
-                  "baseline_mae": round(
-                      baseline_mae,
-                      3
-                  ),
-                  "baseline_improvement_pct":
-                      round(improvement, 2)
+                  "folds": fold_results,
+                  "overall_test_rows":
+                      int(len(actual)),
+                  "overall_mae":
+                      round(overall_mae, 3),
+                  "overall_rmse":
+                      round(overall_rmse, 3),
+                  "overall_baseline_mae":
+                      round(
+                          overall_baseline_mae,
+                          3
+                      ),
+                  "overall_improvement_pct":
+                      round(
+                          overall_improvement,
+                          2
+                      ),
+                  "residual_mean":
+                      round(
+                          overall_residual_mean,
+                          3
+                      ),
+                  "residual_std":
+                      round(
+                          overall_residual_std,
+                          3
+                      ),
+                  "positive_folds":
+                      positive_folds,
+                  "total_folds":
+                      len(fold_results),
+                  "stable_vs_baseline":
+                      stable
               }
-
-              print("")
-              print(f"MODEL: {target}")
-              print(
-                  f"TRAIN ROWS: "
-                  f"{train_target.height}"
-              )
-              print(
-                  f"UNSEEN TEST ROWS: "
-                  f"{test_target.height}"
-              )
-              print(
-                  f"MAE: {mae:.3f}"
-              )
-              print(
-                  f"RMSE: {rmse:.3f}"
-              )
-              print(
-                  f"BASELINE MAE: "
-                  f"{baseline_mae:.3f}"
-              )
-              print(
-                  "IMPROVEMENT VS BASELINE: "
-                  f"{improvement:.2f}%"
-              )
 
           if not results:
               raise RuntimeError(
-                  "No JPro models were trained."
+                  "No validation results generated."
               )
 
           report = {
               "engine": "JPro Cloud Engine",
               "status":
-                  "MODELS_TRAINED_VALIDATION_PENDING",
-              "source":
+                  "CHRONOLOGICAL_VALIDATION_COMPLETE",
+              "method":
+                  "rolling chronological 2025 holdout",
+              "training_source":
                   "nflverse via nflreadpy",
-              "training_seasons": [
-                  2023,
-                  2024
-              ],
-              "unseen_test_season": 2025,
-              "training_table_rows":
-                  int(usable.height),
               "feature_count":
                   len(feature_names),
               "models":
@@ -347,7 +477,7 @@ jobs:
           }
 
           with open(
-              "data/model-training-report.json",
+              "data/validation-report.json",
               "w"
           ) as f:
               json.dump(
@@ -357,37 +487,49 @@ jobs:
               )
 
           print("")
-          print("==============================")
-          print("JPRO MODEL TRAINING COMPLETE")
-          print("==============================")
+          print("=" * 60)
+          print("JPRO VALIDATION SUMMARY")
+          print("=" * 60)
 
           for target, metrics in results.items():
               print(
                   target.upper(),
                   "| MAE:",
-                  metrics["mae"],
+                  metrics["overall_mae"],
                   "| BASELINE:",
-                  metrics["baseline_mae"],
+                  metrics[
+                      "overall_baseline_mae"
+                  ],
                   "| IMPROVEMENT:",
                   str(
                       metrics[
-                          "baseline_improvement_pct"
+                          "overall_improvement_pct"
                       ]
-                  ) + "%"
+                  ) + "%",
+                  "| POSITIVE FOLDS:",
+                  str(
+                      metrics["positive_folds"]
+                  )
+                  + "/"
+                  + str(
+                      metrics["total_folds"]
+                  ),
+                  "| RESIDUAL STD:",
+                  metrics["residual_std"]
               )
 
           print("")
           print(
-              "PREDICTIONS REMAIN LOCKED "
-              "UNTIL VALIDATION"
+              "VALIDATION COMPLETE - "
+              "DO NOT UNLOCK PREDICTIONS YET"
           )
           PY
 
-      - name: Show JPro model results
-        run: cat data/model-training-report.json
+      - name: Show JPro validation results
+        run: cat data/validation-report.json
 
-      - name: Save JPro model results
+      - name: Save JPro validation results
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: train first real models"
-          file_pattern: data/model-training-report.json
+          commit_message: "JPro: chronological validation"
+          file_pattern: data/validation-report.json
