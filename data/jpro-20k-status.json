@@ -1,0 +1,11 @@
+{
+  "status": "READY",
+  "simulations_per_player_prop": 20000,
+  "player_prop_distributions": 2232,
+  "models": [
+    "passing_yards",
+    "rushing_yards",
+    "receiving_yards",
+    "receptions"
+  ]
+}
