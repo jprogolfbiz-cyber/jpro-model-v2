@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install nflreadpy pandas numpy scikit-learn pyarrow
 
-      - name: Generate current JPro projections
+      - name: Build JPro betting distributions
         run: |
           mkdir -p data
 
@@ -43,8 +43,11 @@ jobs:
 
           np.random.seed(20260921)
 
+          SIMS = 20000
+          TEAMS = ["NYG", "LA"]
+
           print("=" * 60)
-          print("JPRO CURRENT PLAYER PROJECTION ENGINE")
+          print("JPRO BETTING DISTRIBUTION ENGINE")
           print("=" * 60)
 
           # --------------------------------------------------
@@ -60,7 +63,10 @@ jobs:
 
           df = pd.DataFrame(df)
 
-          if "recent_team" not in df.columns and "team" in df.columns:
+          if (
+              "recent_team" not in df.columns
+              and "team" in df.columns
+          ):
               df["recent_team"] = df["team"]
 
           targets = [
@@ -177,7 +183,7 @@ jobs:
           ].copy()
 
           # --------------------------------------------------
-          # FEATURE CONFIG
+          # MODEL FEATURES
           # --------------------------------------------------
 
           feature_cols = [
@@ -224,19 +230,28 @@ jobs:
 
           specs = {
               "passing_yards": ["QB"],
+
               "rushing_yards": [
-                  "QB", "RB", "WR"
+                  "QB",
+                  "RB",
+                  "WR"
               ],
+
               "receiving_yards": [
-                  "WR", "TE", "RB"
+                  "WR",
+                  "TE",
+                  "RB"
               ],
+
               "receptions": [
-                  "WR", "TE", "RB"
+                  "WR",
+                  "TE",
+                  "RB"
               ]
           }
 
           # --------------------------------------------------
-          # CURRENT NYG / LA PLAYER ROWS
+          # CURRENT NYG / LA PLAYERS
           # --------------------------------------------------
 
           current = (
@@ -253,7 +268,7 @@ jobs:
 
           current = current[
               current["recent_team"].isin(
-                  ["NYG", "LA"]
+                  TEAMS
               )
           ].copy()
 
@@ -268,7 +283,7 @@ jobs:
               )
 
           # --------------------------------------------------
-          # TRAIN + SIMULATE
+          # TRAIN + CREATE 20K DISTRIBUTIONS
           # --------------------------------------------------
 
           results = []
@@ -360,7 +375,10 @@ jobs:
                   ]
               )
 
-              # Calibration fit
+              # ----------------------------------------------
+              # CALIBRATION RESIDUALS
+              # ----------------------------------------------
+
               model.fit(
                   fit_df[feature_cols],
                   fit_df[target]
@@ -386,10 +404,13 @@ jobs:
 
               if len(residuals) < 100:
                   raise RuntimeError(
-                      f"Insufficient residuals: {target}"
+                      f"Insufficient residuals for {target}"
                   )
 
-              # Final fit on all historical data
+              # ----------------------------------------------
+              # FINAL MODEL FIT
+              # ----------------------------------------------
+
               model.fit(
                   historical[feature_cols],
                   historical[target]
@@ -422,12 +443,14 @@ jobs:
                       float(projections[i])
                   )
 
-                  sampled_errors = (
-                      np.random.choice(
-                          residuals,
-                          size=20000,
-                          replace=True
-                      )
+                  # ------------------------------------------
+                  # 20,000 EMPIRICAL SIMULATIONS
+                  # ------------------------------------------
+
+                  sampled_errors = np.random.choice(
+                      residuals,
+                      size=SIMS,
+                      replace=True
                   )
 
                   sims = (
@@ -438,6 +461,16 @@ jobs:
                   sims = np.maximum(
                       sims,
                       0.0
+                  )
+
+                  # NFL yard/reception results settle as
+                  # whole-number statistics.
+                  sims = np.rint(
+                      sims
+                  ).astype(int)
+
+                  simulation_values = (
+                      sims.tolist()
                   )
 
                   result = {
@@ -530,77 +563,96 @@ jobs:
                               2
                           ),
 
-                      "simulations":
-                          20000,
+                      "simulation_count":
+                          SIMS,
+
+                      "simulation_values":
+                          simulation_values,
 
                       "latest_data_week":
                           int(row["week"])
                   }
 
-                  results.append(
-                      result
-                  )
+                  # ------------------------------------------
+                  # REMOVE LOW-INFORMATION PROPS
+                  # ------------------------------------------
 
-                  print(
-                      result["player"],
-                      "|",
-                      target,
-                      "| PROJ:",
-                      result["projection"],
-                      "| MEDIAN:",
-                      result["median"]
-                  )
+                  keep = True
+
+                  if (
+                      target == "passing_yards"
+                      and projection < 25
+                  ):
+                      keep = False
+
+                  if (
+                      target == "rushing_yards"
+                      and projection < 3
+                  ):
+                      keep = False
+
+                  if (
+                      target == "receiving_yards"
+                      and projection < 5
+                  ):
+                      keep = False
+
+                  if (
+                      target == "receptions"
+                      and projection < 0.5
+                  ):
+                      keep = False
+
+                  if keep:
+
+                      results.append(
+                          result
+                      )
+
+                      print(
+                          result["player"],
+                          "|",
+                          target,
+                          "| PROJ:",
+                          result["projection"],
+                          "| MEDIAN:",
+                          result["median"],
+                          "| STORED SIMS:",
+                          len(
+                              simulation_values
+                          )
+                      )
 
           # --------------------------------------------------
-          # REMOVE LOW-INFORMATION PLAYER/PROP COMBINATIONS
-          # --------------------------------------------------
-
-          filtered = []
-
-          for r in results:
-
-              if (
-                  r["prop"] == "passing_yards"
-                  and r["projection"] < 25
-              ):
-                  continue
-
-              if (
-                  r["prop"] == "rushing_yards"
-                  and r["projection"] < 3
-              ):
-                  continue
-
-              if (
-                  r["prop"] == "receiving_yards"
-                  and r["projection"] < 5
-              ):
-                  continue
-
-              if (
-                  r["prop"] == "receptions"
-                  and r["projection"] < 0.5
-              ):
-                  continue
-
-              filtered.append(r)
-
-          # --------------------------------------------------
-          # SAVE APP-FRIENDLY JSON
+          # SAVE APP-FRIENDLY BETTING JSON
           # --------------------------------------------------
 
           output = {
-              "status": "READY",
-              "game": "NYG @ LA",
-              "season": 2026,
-              "simulations_per_prop": 20000,
+              "status":
+                  "READY",
+
+              "game":
+                  "NYG @ LA",
+
+              "season":
+                  2026,
+
+              "simulations_per_prop":
+                  SIMS,
+
               "generated_at_utc":
                   datetime.now(
                       timezone.utc
                   ).isoformat(),
+
+              "sportsbook_line_mode":
+                  "MANUAL_IPHONE_INPUT",
+
               "sportsbook_lines_connected":
                   False,
-              "projections": filtered
+
+              "projections":
+                  results
           }
 
           with open(
@@ -610,46 +662,41 @@ jobs:
               json.dump(
                   output,
                   f,
-                  indent=2
+                  separators=(",", ":")
               )
 
+          print("")
           print("=" * 60)
-          print("JPRO CURRENT PROJECTIONS COMPLETE")
+          print("JPRO BETTING DISTRIBUTIONS READY")
+          print("=" * 60)
+
           print(
               "GAME:",
               output["game"]
           )
+
           print(
-              "CURRENT PROP PROJECTIONS:",
-              len(filtered)
+              "PLAYER PROPS:",
+              len(results)
           )
+
           print(
               "SIMULATIONS PER PROP:",
-              20000
+              SIMS
           )
+
+          print(
+              "TOTAL STORED OUTCOMES:",
+              len(results) * SIMS
+          )
+
           print("=" * 60)
-
-          # Print a preview for GitHub Actions
-          print("")
-          print("JPRO PROJECTION PREVIEW")
-          print("-" * 60)
-
-          for r in filtered[:20]:
-              print(
-                  r["player"],
-                  "|",
-                  r["prop"],
-                  "| PROJ:",
-                  r["projection"],
-                  "| MEDIAN:",
-                  r["median"]
-              )
 
           PY
 
-      - name: Show JPro current projection status
+      - name: Verify JPro distributions
         run: |
-          python - <<'PY'
+          python <<'PY'
           import json
 
           with open(
@@ -657,35 +704,72 @@ jobs:
           ) as f:
               d = json.load(f)
 
-          print("STATUS:", d["status"])
-          print("GAME:", d["game"])
+          print("=" * 60)
+          print("JPRO DISTRIBUTION AUDIT")
+          print("=" * 60)
+
           print(
-              "PROJECTIONS:",
-              len(d["projections"])
+              "STATUS:",
+              d["status"]
           )
+
+          print(
+              "GAME:",
+              d["game"]
+          )
+
+          print(
+              "PLAYER PROPS:",
+              len(
+                  d["projections"]
+              )
+          )
+
           print(
               "SIMULATIONS EACH:",
-              d["simulations_per_prop"]
+              d[
+                  "simulations_per_prop"
+              ]
           )
 
           print("")
-          print("FIRST JPRO NUMBERS:")
-          print("=" * 50)
+          print("DISTRIBUTION PREVIEW")
+          print("-" * 60)
 
           for x in d["projections"][:15]:
+
+              stored = len(
+                  x[
+                      "simulation_values"
+                  ]
+              )
+
               print(
                   x["player"],
                   "|",
                   x["prop"],
-                  "|",
+                  "| PROJ:",
                   x["projection"],
-                  "| median",
-                  x["median"]
+                  "| MEDIAN:",
+                  x["median"],
+                  "| STORED SIMS:",
+                  stored
               )
+
+              if stored != 20000:
+                  raise RuntimeError(
+                      "Simulation count mismatch"
+                  )
+
+          print("")
+          print(
+              "JPRO DISTRIBUTION AUDIT PASSED"
+          )
+
           PY
 
-      - name: Save current JPro projections
+      - name: Save JPro betting distributions
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: current 20K projections"
+          commit_message: "JPro: add 20K betting distributions"
           file_pattern: data/jpro-current-projections.json
