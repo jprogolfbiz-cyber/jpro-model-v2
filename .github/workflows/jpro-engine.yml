@@ -19,12 +19,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install NFL data tools
+      - name: Install JPro tools
         run: |
           python -m pip install --upgrade pip
-          pip install nflreadpy polars pyarrow
+          pip install nflreadpy polars pyarrow scikit-learn numpy
 
-      - name: Pull real NFL player data
+      - name: Build JPro training data
         run: |
           mkdir -p data
 
@@ -32,44 +32,126 @@ jobs:
           import json
           from datetime import datetime, timezone
           import nflreadpy as nfl
+          import polars as pl
 
-          print("JPRO REAL NFL DATA PULL STARTING")
+          print("JPRO TRAINING PIPELINE STARTING")
 
           seasons = [2023, 2024, 2025]
-          weekly = nfl.load_player_stats(seasons)
+          df = nfl.load_player_stats(seasons)
 
-          rows = weekly.height
-          columns = weekly.columns
+          print(f"RAW ROWS: {df.height}")
+          print(f"RAW COLUMNS: {len(df.columns)}")
 
-          print(f"REAL NFL ROWS DOWNLOADED: {rows}")
-          print(f"COLUMNS FOUND: {len(columns)}")
+          required = [
+              "player_id",
+              "player_display_name",
+              "position",
+              "season",
+              "week",
+              "recent_team",
+              "opponent_team",
+              "passing_yards",
+              "rushing_yards",
+              "receiving_yards",
+              "receptions",
+              "targets",
+              "carries",
+              "rushing_tds",
+              "receiving_tds"
+          ]
 
-          if rows <= 0:
-              raise RuntimeError("JPro received zero NFL rows")
+          missing = [c for c in required if c not in df.columns]
+          print("MISSING REQUIRED COLUMNS:", missing)
 
-          status = {
+          if missing:
+              raise RuntimeError(
+                  "Schema audit failed. Missing: " + ", ".join(missing)
+              )
+
+          df = df.sort(["player_id", "season", "week"])
+
+          stat_cols = [
+              "passing_yards",
+              "rushing_yards",
+              "receiving_yards",
+              "receptions",
+              "targets",
+              "carries",
+              "rushing_tds",
+              "receiving_tds"
+          ]
+
+          feature_names = []
+
+          for col in stat_cols:
+              lag1 = f"{col}_lag1"
+              avg3 = f"{col}_avg3"
+              avg5 = f"{col}_avg5"
+
+              df = df.with_columns(
+                  pl.col(col)
+                  .shift(1)
+                  .over("player_id")
+                  .alias(lag1),
+
+                  pl.col(col)
+                  .shift(1)
+                  .rolling_mean(window_size=3)
+                  .over("player_id")
+                  .alias(avg3),
+
+                  pl.col(col)
+                  .shift(1)
+                  .rolling_mean(window_size=5)
+                  .over("player_id")
+                  .alias(avg5)
+              )
+
+              feature_names.extend([lag1, avg3, avg5])
+
+          df = df.with_columns(
+              (
+                  pl.col("rushing_tds") +
+                  pl.col("receiving_tds")
+              ).alias("total_tds")
+          )
+
+          usable = df.drop_nulls(feature_names)
+
+          print(f"LEAKAGE-SAFE TRAINING ROWS: {usable.height}")
+          print(f"FEATURES CREATED: {len(feature_names)}")
+
+          if usable.height <= 0:
+              raise RuntimeError("No usable training rows created.")
+
+          audit = {
               "engine": "JPro Cloud Engine",
-              "status": "REAL_DATA_CONNECTED",
+              "status": "TRAINING_DATA_READY",
               "source": "nflverse via nflreadpy",
-              "seasons_requested": seasons,
-              "rows_downloaded": rows,
-              "columns_found": len(columns),
-              "sample_columns": columns[:25],
-              "model_outputs": "LOCKED",
+              "seasons": seasons,
+              "raw_rows": df.height,
+              "raw_columns": len(df.columns),
+              "training_rows": usable.height,
+              "features_created": len(feature_names),
+              "feature_names": feature_names,
+              "schema_check": "PASS",
+              "leakage_protection": "SHIFTED_PRIOR_GAMES_ONLY",
+              "models_trained": False,
+              "predictions_unlocked": False,
               "updated_at": datetime.now(timezone.utc).isoformat()
           }
 
-          with open("data/engine-status.json", "w") as f:
-              json.dump(status, f, indent=2)
+          with open("data/training-audit.json", "w") as f:
+              json.dump(audit, f, indent=2)
 
-          print("JPRO REAL NFL DATA CONNECTION VERIFIED")
+          print("JPRO TRAINING DATA READY")
           PY
 
-      - name: Show downloaded data status
-        run: cat data/engine-status.json
+      - name: Show training audit
+        run: cat data/training-audit.json
 
-      - name: Save JPro data status
+      - name: Save JPro training audit
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: connect real NFL data"
-          file_pattern: data/engine-status.json
+          commit_message: "JPro: build leakage-safe training data"
+          file_pattern: data/training-audit.json
