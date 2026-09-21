@@ -22,514 +22,504 @@ jobs:
       - name: Install JPro tools
         run: |
           python -m pip install --upgrade pip
-          pip install nflreadpy polars pyarrow scikit-learn numpy
+          pip install nflreadpy pandas numpy scikit-learn pyarrow
 
-      - name: Validate JPro models
+      - name: Run JPro 20K simulation engine
         run: |
-          mkdir -p data
+          mkdir -p data models
 
-          python - <<'PY'
+          python <<'PY'
           import json
+          import math
           import numpy as np
+          import pandas as pd
           import nflreadpy as nfl
-          import polars as pl
 
-          from datetime import datetime, timezone
+          from sklearn.compose import ColumnTransformer
+          from sklearn.impute import SimpleImputer
           from sklearn.linear_model import Ridge
-          from sklearn.metrics import mean_absolute_error, mean_squared_error
+          from sklearn.pipeline import Pipeline
+          from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-          print("JPRO CHRONOLOGICAL VALIDATION STARTING")
+          np.random.seed(20260921)
 
-          seasons = [2023, 2024, 2025]
-          df = nfl.load_player_stats(seasons)
+          print("=" * 55)
+          print("JPRO 20K SIMULATION ENGINE")
+          print("=" * 55)
+
+          # ---------------------------------------------------------
+          # 1. LOAD REAL NFL PLAYER DATA
+          # ---------------------------------------------------------
+          df = nfl.load_player_stats([2022, 2023, 2024, 2025])
+
+          if hasattr(df, "to_pandas"):
+              df = df.to_pandas()
+
+          df = pd.DataFrame(df)
+
+          print("REAL NFL ROWS:", len(df))
+          print("RAW COLUMNS:", len(df.columns))
+
+          # nflverse schema compatibility
+          if "recent_team" not in df.columns and "team" in df.columns:
+              df["recent_team"] = df["team"]
 
           required = [
               "player_id",
+              "player_display_name",
               "position",
               "season",
               "week",
+              "recent_team",
               "passing_yards",
               "rushing_yards",
               "receiving_yards",
-              "receptions",
-              "targets",
-              "carries",
-              "rushing_tds",
-              "receiving_tds"
+              "receptions"
           ]
 
           missing = [c for c in required if c not in df.columns]
 
           if missing:
               raise RuntimeError(
-                  "Missing required columns: " + ", ".join(missing)
+                  f"JPro schema audit failed. Missing columns: {missing}"
               )
 
-          df = df.sort(["player_id", "season", "week"])
-
-          stat_cols = [
+          # ---------------------------------------------------------
+          # 2. CLEAN + SORT
+          # ---------------------------------------------------------
+          numeric_targets = [
               "passing_yards",
               "rushing_yards",
               "receiving_yards",
-              "receptions",
-              "targets",
-              "carries",
-              "rushing_tds",
-              "receiving_tds"
+              "receptions"
           ]
 
-          feature_names = []
+          for col in numeric_targets:
+              df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
 
-          for col in stat_cols:
-              lag1 = f"{col}_lag1"
-              avg3 = f"{col}_avg3"
-              avg5 = f"{col}_avg5"
+          df["season"] = pd.to_numeric(df["season"], errors="coerce")
+          df["week"] = pd.to_numeric(df["week"], errors="coerce")
 
-              df = df.with_columns(
-                  pl.col(col)
-                  .shift(1)
-                  .over("player_id")
-                  .alias(lag1),
+          df = df.dropna(
+              subset=[
+                  "player_id",
+                  "season",
+                  "week"
+              ]
+          ).copy()
 
-                  pl.col(col)
-                  .shift(1)
-                  .rolling_mean(window_size=3)
-                  .over("player_id")
-                  .alias(avg3),
+          df = df.sort_values(
+              ["player_id", "season", "week"]
+          ).reset_index(drop=True)
 
-                  pl.col(col)
-                  .shift(1)
-                  .rolling_mean(window_size=5)
-                  .over("player_id")
-                  .alias(avg5)
+          # ---------------------------------------------------------
+          # 3. LEAKAGE-SAFE FEATURES
+          # Every rolling feature is SHIFTED one game.
+          # ---------------------------------------------------------
+          group = df.groupby("player_id", group_keys=False)
+
+          for stat in numeric_targets:
+              df[f"{stat}_lag1"] = group[stat].shift(1)
+
+              df[f"{stat}_avg3"] = group[stat].transform(
+                  lambda x: x.shift(1).rolling(
+                      3,
+                      min_periods=1
+                  ).mean()
               )
 
-              feature_names.extend([
-                  lag1,
-                  avg3,
-                  avg5
-              ])
+              df[f"{stat}_avg5"] = group[stat].transform(
+                  lambda x: x.shift(1).rolling(
+                      5,
+                      min_periods=1
+                  ).mean()
+              )
 
-          usable = df.drop_nulls(feature_names)
+              df[f"{stat}_std5"] = group[stat].transform(
+                  lambda x: x.shift(1).rolling(
+                      5,
+                      min_periods=2
+                  ).std()
+              )
 
-          print(f"USABLE ROWS: {usable.height}")
-          print(f"FEATURES: {len(feature_names)}")
+          df["games_before"] = group.cumcount()
 
-          targets = {
-              "passing_yards": ["QB"],
-              "rushing_yards": ["QB", "RB"],
-              "receiving_yards": ["WR", "TE", "RB"],
-              "receptions": ["WR", "TE", "RB"]
+          # Require some prior history.
+          train_df = df[df["games_before"] >= 3].copy()
+
+          print("LEAKAGE-SAFE ROWS:", len(train_df))
+
+          # ---------------------------------------------------------
+          # 4. MODEL CONFIGURATION
+          # ---------------------------------------------------------
+          model_specs = {
+              "passing_yards": {
+                  "positions": ["QB"]
+              },
+              "rushing_yards": {
+                  "positions": ["QB", "RB", "WR"]
+              },
+              "receiving_yards": {
+                  "positions": ["WR", "TE", "RB"]
+              },
+              "receptions": {
+                  "positions": ["WR", "TE", "RB"]
+              }
           }
 
-          # Each 2025 block is predicted using ONLY data
-          # available before that block.
-          folds = [
-              {
-                  "name": "2025_W1_W6",
-                  "test_start": 1,
-                  "test_end": 6
-              },
-              {
-                  "name": "2025_W7_W12",
-                  "test_start": 7,
-                  "test_end": 12
-              },
-              {
-                  "name": "2025_W13_PLUS",
-                  "test_start": 13,
-                  "test_end": 30
-              }
+          feature_cols = [
+              "season",
+              "week",
+              "games_before",
+
+              "passing_yards_lag1",
+              "passing_yards_avg3",
+              "passing_yards_avg5",
+              "passing_yards_std5",
+
+              "rushing_yards_lag1",
+              "rushing_yards_avg3",
+              "rushing_yards_avg5",
+              "rushing_yards_std5",
+
+              "receiving_yards_lag1",
+              "receiving_yards_avg3",
+              "receiving_yards_avg5",
+              "receiving_yards_std5",
+
+              "receptions_lag1",
+              "receptions_avg3",
+              "receptions_avg5",
+              "receptions_std5",
+
+              "position",
+              "recent_team"
           ]
 
-          results = {}
+          numeric_features = [
+              c for c in feature_cols
+              if c not in ["position", "recent_team"]
+          ]
 
-          for target, positions in targets.items():
+          categorical_features = [
+              "position",
+              "recent_team"
+          ]
 
-              print("")
-              print("=" * 50)
-              print(f"VALIDATING: {target}")
-              print("=" * 50)
+          # ---------------------------------------------------------
+          # 5. TRAIN + GENERATE 20,000-SIM DISTRIBUTIONS
+          # ---------------------------------------------------------
+          output = {
+              "status": "READY",
+              "engine": "JPro 20K",
+              "simulations_per_player_prop": 20000,
+              "data_source": "nflverse via nflreadpy",
+              "models": {},
+              "players": []
+          }
 
-              fold_results = []
+          latest_rows = (
+              train_df
+              .sort_values(["season", "week"])
+              .groupby("player_id")
+              .tail(1)
+              .copy()
+          )
 
-              all_actual = []
-              all_pred = []
-              all_baseline = []
+          print("PLAYERS AVAILABLE FOR SIM:", len(latest_rows))
 
-              for fold in folds:
+          for target, spec in model_specs.items():
 
-                  start = fold["test_start"]
-                  end = fold["test_end"]
+              target_df = train_df[
+                  train_df["position"].isin(spec["positions"])
+              ].copy()
 
-                  # Historical seasons always allowed.
-                  historical_train = usable.filter(
-                      pl.col("season") < 2025
-                  )
+              # Avoid training on meaningless zero-only rows.
+              if target == "passing_yards":
+                  target_df = target_df[
+                      target_df["position"] == "QB"
+                  ]
 
-                  # For later folds, allow only earlier
-                  # 2025 weeks into training.
-                  if start > 1:
-                      earlier_2025 = usable.filter(
-                          (pl.col("season") == 2025)
-                          & (pl.col("week") < start)
-                      )
+              X = target_df[feature_cols]
+              y = target_df[target].astype(float)
 
-                      train = pl.concat(
-                          [historical_train, earlier_2025],
-                          how="vertical"
-                      )
-                  else:
-                      train = historical_train
-
-                  test = usable.filter(
-                      (pl.col("season") == 2025)
-                      & (pl.col("week") >= start)
-                      & (pl.col("week") <= end)
-                  )
-
-                  train_target = train.filter(
-                      pl.col("position").is_in(positions)
-                  )
-
-                  test_target = test.filter(
-                      pl.col("position").is_in(positions)
-                  )
-
-                  if (
-                      train_target.height < 100
-                      or test_target.height < 20
-                  ):
-                      print(
-                          f"{fold['name']} SKIPPED "
-                          "- insufficient rows"
-                      )
-                      continue
-
-                  Xtr = np.asarray(
-                      train_target
-                      .select(feature_names)
-                      .to_numpy(),
-                      dtype=np.float64
-                  )
-
-                  Xte = np.asarray(
-                      test_target
-                      .select(feature_names)
-                      .to_numpy(),
-                      dtype=np.float64
-                  )
-
-                  ytr = np.asarray(
-                      train_target
-                      .select(target)
-                      .to_numpy()
-                      .ravel(),
-                      dtype=np.float64
-                  )
-
-                  yte = np.asarray(
-                      test_target
-                      .select(target)
-                      .to_numpy()
-                      .ravel(),
-                      dtype=np.float64
-                  )
-
-                  model = Ridge(alpha=10.0)
-                  model.fit(Xtr, ytr)
-
-                  pred = model.predict(Xte)
-
-                  # Baseline uses only training data.
-                  baseline_value = float(np.mean(ytr))
-
-                  baseline_pred = np.full(
-                      len(yte),
-                      baseline_value,
-                      dtype=np.float64
-                  )
-
-                  mae = float(
-                      mean_absolute_error(yte, pred)
-                  )
-
-                  rmse = float(
-                      np.sqrt(
-                          mean_squared_error(yte, pred)
-                      )
-                  )
-
-                  baseline_mae = float(
-                      mean_absolute_error(
-                          yte,
-                          baseline_pred
-                      )
-                  )
-
-                  improvement = (
+              preprocessor = ColumnTransformer(
+                  transformers=[
                       (
-                          baseline_mae - mae
+                          "num",
+                          Pipeline(
+                              steps=[
+                                  (
+                                      "imputer",
+                                      SimpleImputer(
+                                          strategy="median"
+                                      )
+                                  ),
+                                  (
+                                      "scale",
+                                      StandardScaler()
+                                  )
+                              ]
+                          ),
+                          numeric_features
+                      ),
+                      (
+                          "cat",
+                          Pipeline(
+                              steps=[
+                                  (
+                                      "imputer",
+                                      SimpleImputer(
+                                          strategy="most_frequent"
+                                      )
+                                  ),
+                                  (
+                                      "onehot",
+                                      OneHotEncoder(
+                                          handle_unknown="ignore"
+                                      )
+                                  )
+                              ]
+                          ),
+                          categorical_features
                       )
-                      / baseline_mae
-                      * 100
-                      if baseline_mae > 0
-                      else 0.0
-                  )
-
-                  residuals = yte - pred
-
-                  residual_mean = float(
-                      np.mean(residuals)
-                  )
-
-                  residual_std = float(
-                      np.std(residuals)
-                  )
-
-                  fold_result = {
-                      "fold": fold["name"],
-                      "train_rows":
-                          int(train_target.height),
-                      "test_rows":
-                          int(test_target.height),
-                      "mae":
-                          round(mae, 3),
-                      "rmse":
-                          round(rmse, 3),
-                      "baseline_mae":
-                          round(baseline_mae, 3),
-                      "improvement_pct":
-                          round(improvement, 2),
-                      "residual_mean":
-                          round(residual_mean, 3),
-                      "residual_std":
-                          round(residual_std, 3)
-                  }
-
-                  fold_results.append(fold_result)
-
-                  all_actual.extend(yte.tolist())
-                  all_pred.extend(pred.tolist())
-                  all_baseline.extend(
-                      baseline_pred.tolist()
-                  )
-
-                  print("")
-                  print(f"FOLD: {fold['name']}")
-                  print(
-                      f"TEST ROWS: "
-                      f"{test_target.height}"
-                  )
-                  print(f"MAE: {mae:.3f}")
-                  print(
-                      f"BASELINE MAE: "
-                      f"{baseline_mae:.3f}"
-                  )
-                  print(
-                      "IMPROVEMENT: "
-                      f"{improvement:.2f}%"
-                  )
-                  print(
-                      "RESIDUAL MEAN: "
-                      f"{residual_mean:.3f}"
-                  )
-                  print(
-                      "RESIDUAL STD: "
-                      f"{residual_std:.3f}"
-                  )
-
-              if not fold_results:
-                  print(
-                      f"NO VALID FOLDS FOR {target}"
-                  )
-                  continue
-
-              actual = np.asarray(
-                  all_actual,
-                  dtype=np.float64
+                  ]
               )
 
-              predictions = np.asarray(
-                  all_pred,
-                  dtype=np.float64
-              )
-
-              baselines = np.asarray(
-                  all_baseline,
-                  dtype=np.float64
-              )
-
-              overall_mae = float(
-                  mean_absolute_error(
-                      actual,
-                      predictions
-                  )
-              )
-
-              overall_rmse = float(
-                  np.sqrt(
-                      mean_squared_error(
-                          actual,
-                          predictions
+              model = Pipeline(
+                  steps=[
+                      ("prep", preprocessor),
+                      (
+                          "model",
+                          Ridge(
+                              alpha=10.0
+                          )
                       )
-                  )
+                  ]
               )
 
-              overall_baseline_mae = float(
-                  mean_absolute_error(
-                      actual,
-                      baselines
-                  )
+              # Chronological 80/20 residual calibration.
+              target_df = target_df.sort_values(
+                  ["season", "week"]
+              ).reset_index(drop=True)
+
+              split = int(len(target_df) * 0.80)
+
+              fit_df = target_df.iloc[:split].copy()
+              test_df = target_df.iloc[split:].copy()
+
+              model.fit(
+                  fit_df[feature_cols],
+                  fit_df[target]
               )
 
-              overall_improvement = (
-                  (
-                      overall_baseline_mae
-                      - overall_mae
-                  )
-                  / overall_baseline_mae
-                  * 100
-                  if overall_baseline_mae > 0
-                  else 0.0
+              test_pred = model.predict(
+                  test_df[feature_cols]
               )
 
-              residuals = actual - predictions
+              residuals = (
+                  test_df[target].to_numpy(dtype=float)
+                  - test_pred
+              )
 
-              overall_residual_mean = float(
+              residuals = residuals[
+                  np.isfinite(residuals)
+              ]
+
+              if len(residuals) < 100:
+                  raise RuntimeError(
+                      f"Not enough residuals for {target}"
+                  )
+
+              residual_mean = float(
                   np.mean(residuals)
               )
 
-              overall_residual_std = float(
-                  np.std(residuals)
+              residual_std = float(
+                  np.std(residuals, ddof=1)
               )
 
-              positive_folds = sum(
-                  1
-                  for f in fold_results
-                  if f["improvement_pct"] > 0
+              # Refit on all available historical rows after
+              # calibration statistics have been measured.
+              model.fit(
+                  target_df[feature_cols],
+                  target_df[target]
               )
 
-              stable = (
-                  positive_folds
-                  == len(fold_results)
-              )
-
-              results[target] = {
-                  "folds": fold_results,
-                  "overall_test_rows":
-                      int(len(actual)),
-                  "overall_mae":
-                      round(overall_mae, 3),
-                  "overall_rmse":
-                      round(overall_rmse, 3),
-                  "overall_baseline_mae":
-                      round(
-                          overall_baseline_mae,
-                          3
-                      ),
-                  "overall_improvement_pct":
-                      round(
-                          overall_improvement,
-                          2
-                      ),
-                  "residual_mean":
-                      round(
-                          overall_residual_mean,
-                          3
-                      ),
-                  "residual_std":
-                      round(
-                          overall_residual_std,
-                          3
-                      ),
-                  "positive_folds":
-                      positive_folds,
-                  "total_folds":
-                      len(fold_results),
-                  "stable_vs_baseline":
-                      stable
+              output["models"][target] = {
+                  "training_rows": int(len(target_df)),
+                  "calibration_rows": int(len(residuals)),
+                  "residual_mean": round(
+                      residual_mean,
+                      4
+                  ),
+                  "residual_std": round(
+                      residual_std,
+                      4
+                  )
               }
 
-          if not results:
-              raise RuntimeError(
-                  "No validation results generated."
+              eligible = latest_rows[
+                  latest_rows["position"].isin(
+                      spec["positions"]
+                  )
+              ].copy()
+
+              if target == "passing_yards":
+                  eligible = eligible[
+                      eligible["position"] == "QB"
+                  ]
+
+              if eligible.empty:
+                  continue
+
+              projections = model.predict(
+                  eligible[feature_cols]
               )
 
-          report = {
-              "engine": "JPro Cloud Engine",
-              "status":
-                  "CHRONOLOGICAL_VALIDATION_COMPLETE",
-              "method":
-                  "rolling chronological 2025 holdout",
-              "training_source":
-                  "nflverse via nflreadpy",
-              "feature_count":
-                  len(feature_names),
-              "models":
-                  results,
-              "predictions_unlocked":
-                  False,
-              "updated_at":
-                  datetime.now(
-                      timezone.utc
-                  ).isoformat()
-          }
+              for idx, (_, row) in enumerate(
+                  eligible.iterrows()
+              ):
+                  projection = float(
+                      max(0.0, projections[idx])
+                  )
 
+                  # Empirical residual bootstrap:
+                  # simulation uncertainty comes from actual
+                  # unseen historical model errors.
+                  sampled_errors = np.random.choice(
+                      residuals,
+                      size=20000,
+                      replace=True
+                  )
+
+                  sims = (
+                      projection
+                      + sampled_errors
+                  )
+
+                  # Yardage/receptions cannot be negative.
+                  sims = np.maximum(sims, 0.0)
+
+                  percentiles = {
+                      "p10": round(
+                          float(np.percentile(sims, 10)),
+                          2
+                      ),
+                      "p25": round(
+                          float(np.percentile(sims, 25)),
+                          2
+                      ),
+                      "median": round(
+                          float(np.percentile(sims, 50)),
+                          2
+                      ),
+                      "p75": round(
+                          float(np.percentile(sims, 75)),
+                          2
+                      ),
+                      "p90": round(
+                          float(np.percentile(sims, 90)),
+                          2
+                      )
+                  }
+
+                  player_result = {
+                      "player_id": str(
+                          row["player_id"]
+                      ),
+                      "player": str(
+                          row["player_display_name"]
+                      ),
+                      "position": str(
+                          row["position"]
+                      ),
+                      "team": str(
+                          row["recent_team"]
+                      ),
+                      "prop": target,
+                      "projection": round(
+                          projection,
+                          2
+                      ),
+                      "sim_mean": round(
+                          float(np.mean(sims)),
+                          2
+                      ),
+                      "sim_std": round(
+                          float(np.std(sims)),
+                          2
+                      ),
+                      "percentiles": percentiles,
+                      "simulations": 20000
+                  }
+
+                  output["players"].append(
+                      player_result
+                  )
+
+              print(
+                  target.upper(),
+                  "| TRAIN ROWS:",
+                  len(target_df),
+                  "| PLAYERS SIMULATED:",
+                  len(eligible),
+                  "| RESIDUAL STD:",
+                  round(residual_std, 3)
+              )
+
+          # ---------------------------------------------------------
+          # 6. SAVE JPRO OUTPUT
+          # ---------------------------------------------------------
           with open(
-              "data/validation-report.json",
+              "data/jpro-20k.json",
               "w"
           ) as f:
               json.dump(
-                  report,
+                  output,
                   f,
                   indent=2
               )
 
-          print("")
-          print("=" * 60)
-          print("JPRO VALIDATION SUMMARY")
-          print("=" * 60)
+          summary = {
+              "status": "READY",
+              "simulations_per_player_prop": 20000,
+              "player_prop_distributions": len(
+                  output["players"]
+              ),
+              "models": list(
+                  output["models"].keys()
+              )
+          }
 
-          for target, metrics in results.items():
-              print(
-                  target.upper(),
-                  "| MAE:",
-                  metrics["overall_mae"],
-                  "| BASELINE:",
-                  metrics[
-                      "overall_baseline_mae"
-                  ],
-                  "| IMPROVEMENT:",
-                  str(
-                      metrics[
-                          "overall_improvement_pct"
-                      ]
-                  ) + "%",
-                  "| POSITIVE FOLDS:",
-                  str(
-                      metrics["positive_folds"]
-                  )
-                  + "/"
-                  + str(
-                      metrics["total_folds"]
-                  ),
-                  "| RESIDUAL STD:",
-                  metrics["residual_std"]
+          with open(
+              "data/jpro-20k-status.json",
+              "w"
+          ) as f:
+              json.dump(
+                  summary,
+                  f,
+                  indent=2
               )
 
-          print("")
+          print("=" * 55)
+          print("JPRO 20K ENGINE COMPLETE")
           print(
-              "VALIDATION COMPLETE - "
-              "DO NOT UNLOCK PREDICTIONS YET"
+              "PLAYER-PROP DISTRIBUTIONS:",
+              len(output["players"])
           )
+          print(
+              "SIMULATIONS EACH: 20,000"
+          )
+          print("=" * 55)
           PY
 
-      - name: Show JPro validation results
-        run: cat data/validation-report.json
+      - name: Show JPro 20K status
+        run: |
+          cat data/jpro-20k-status.json
 
-      - name: Save JPro validation results
+      - name: Save JPro 20K results
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: chronological validation"
-          file_pattern: data/validation-report.json
+          commit_message: "JPro: 20K simulation distributions"
+          file_pattern: data/jpro-20k*.json
