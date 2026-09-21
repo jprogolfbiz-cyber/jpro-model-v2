@@ -22,181 +22,53 @@ jobs:
       - name: Install JPro tools
         run: |
           python -m pip install --upgrade pip
-          pip install nflreadpy pandas numpy pyarrow
+          pip install nflreadpy pandas numpy scikit-learn pyarrow
 
-      - name: Build current JPro game layer
+      - name: Generate current JPro projections
         run: |
           mkdir -p data
 
           python <<'PY'
           import json
+          import numpy as np
           import pandas as pd
           import nflreadpy as nfl
+
           from datetime import datetime, timezone
+          from sklearn.compose import ColumnTransformer
+          from sklearn.impute import SimpleImputer
+          from sklearn.linear_model import Ridge
+          from sklearn.pipeline import Pipeline
+          from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+          np.random.seed(20260921)
 
           print("=" * 60)
-          print("JPRO CURRENT GAME LAYER")
+          print("JPRO CURRENT PLAYER PROJECTION ENGINE")
           print("=" * 60)
 
-          # -------------------------------------------------------
-          # 1. LOAD CURRENT 2026 NFL SCHEDULE
-          # -------------------------------------------------------
-          schedule = nfl.load_schedules([2026])
+          # --------------------------------------------------
+          # LOAD REAL NFL DATA
+          # --------------------------------------------------
 
-          if hasattr(schedule, "to_pandas"):
-              schedule = schedule.to_pandas()
-
-          schedule = pd.DataFrame(schedule)
-
-          print("2026 SCHEDULE ROWS:", len(schedule))
-          print("SCHEDULE COLUMNS:", len(schedule.columns))
-
-          # -------------------------------------------------------
-          # 2. LOCATE SEPTEMBER 21, 2026 GAMES
-          # -------------------------------------------------------
-          date_col = None
-
-          for candidate in [
-              "gameday",
-              "game_date",
-              "date"
-          ]:
-              if candidate in schedule.columns:
-                  date_col = candidate
-                  break
-
-          if date_col is None:
-              raise RuntimeError(
-                  "Could not locate schedule date column."
-              )
-
-          schedule["_jpro_date"] = pd.to_datetime(
-              schedule[date_col],
-              errors="coerce"
-          ).dt.date
-
-          target_date = pd.Timestamp(
-              "2026-09-21"
-          ).date()
-
-          tonight = schedule[
-              schedule["_jpro_date"] == target_date
-          ].copy()
-
-          print(
-              "GAMES FOUND FOR 2026-09-21:",
-              len(tonight)
+          df = nfl.load_player_stats(
+              [2022, 2023, 2024, 2025, 2026]
           )
 
-          if tonight.empty:
-              raise RuntimeError(
-                  "No NFL games found for 2026-09-21. "
-                  "JPro will not invent a matchup."
-              )
+          if hasattr(df, "to_pandas"):
+              df = df.to_pandas()
 
-          # -------------------------------------------------------
-          # 3. NORMALIZE GAME FIELDS
-          # -------------------------------------------------------
-          away_col = next(
-              (
-                  c for c in [
-                      "away_team",
-                      "away"
-                  ]
-                  if c in tonight.columns
-              ),
-              None
-          )
+          df = pd.DataFrame(df)
 
-          home_col = next(
-              (
-                  c for c in [
-                      "home_team",
-                      "home"
-                  ]
-                  if c in tonight.columns
-              ),
-              None
-          )
+          if "recent_team" not in df.columns and "team" in df.columns:
+              df["recent_team"] = df["team"]
 
-          if away_col is None or home_col is None:
-              raise RuntimeError(
-                  "Could not identify home/away team columns."
-              )
-
-          games = []
-
-          for _, row in tonight.iterrows():
-
-              game = {
-                  "game_id": str(
-                      row.get(
-                          "game_id",
-                          ""
-                      )
-                  ),
-                  "date": str(
-                      target_date
-                  ),
-                  "away_team": str(
-                      row[away_col]
-                  ),
-                  "home_team": str(
-                      row[home_col]
-                  )
-              }
-
-              for field in [
-                  "gametime",
-                  "weekday",
-                  "location",
-                  "roof",
-                  "surface",
-                  "temp",
-                  "wind",
-                  "spread_line",
-                  "total_line"
-              ]:
-                  if field in tonight.columns:
-                      value = row.get(field)
-
-                      if pd.isna(value):
-                          value = None
-
-                      elif hasattr(
-                          value,
-                          "item"
-                      ):
-                          value = value.item()
-
-                      game[field] = value
-
-              games.append(game)
-
-              print(
-                  "FOUND GAME:",
-                  game["away_team"],
-                  "@",
-                  game["home_team"]
-              )
-
-          # -------------------------------------------------------
-          # 4. LOAD REAL NFL PLAYER STATS
-          # -------------------------------------------------------
-          stats = nfl.load_player_stats(
-              [2024, 2025, 2026]
-          )
-
-          if hasattr(stats, "to_pandas"):
-              stats = stats.to_pandas()
-
-          stats = pd.DataFrame(stats)
-
-          if (
-              "recent_team" not in stats.columns
-              and "team" in stats.columns
-          ):
-              stats["recent_team"] = stats["team"]
+          targets = [
+              "passing_yards",
+              "rushing_yards",
+              "receiving_yards",
+              "receptions"
+          ]
 
           required = [
               "player_id",
@@ -205,209 +77,615 @@ jobs:
               "season",
               "week",
               "recent_team"
-          ]
+          ] + targets
 
           missing = [
               c for c in required
-              if c not in stats.columns
+              if c not in df.columns
           ]
 
           if missing:
               raise RuntimeError(
-                  f"Missing player fields: {missing}"
+                  f"Missing required columns: {missing}"
               )
 
-          stats["season"] = pd.to_numeric(
-              stats["season"],
+          for col in targets:
+              df[col] = pd.to_numeric(
+                  df[col],
+                  errors="coerce"
+              ).fillna(0.0)
+
+          df["season"] = pd.to_numeric(
+              df["season"],
               errors="coerce"
           )
 
-          stats["week"] = pd.to_numeric(
-              stats["week"],
+          df["week"] = pd.to_numeric(
+              df["week"],
               errors="coerce"
           )
 
-          stats = stats.dropna(
+          df = df.dropna(
               subset=[
                   "player_id",
                   "season",
                   "week"
               ]
+          ).copy()
+
+          df = df.sort_values(
+              ["player_id", "season", "week"]
+          ).reset_index(drop=True)
+
+          print("REAL NFL ROWS:", len(df))
+
+          # --------------------------------------------------
+          # LEAKAGE-SAFE FEATURES
+          # --------------------------------------------------
+
+          group = df.groupby(
+              "player_id",
+              group_keys=False
           )
 
-          # Most recent known row for each player.
-          latest = (
-              stats
+          for stat in targets:
+
+              df[f"{stat}_lag1"] = (
+                  group[stat].shift(1)
+              )
+
+              df[f"{stat}_avg3"] = (
+                  group[stat].transform(
+                      lambda x:
+                      x.shift(1)
+                       .rolling(
+                           3,
+                           min_periods=1
+                       )
+                       .mean()
+                  )
+              )
+
+              df[f"{stat}_avg5"] = (
+                  group[stat].transform(
+                      lambda x:
+                      x.shift(1)
+                       .rolling(
+                           5,
+                           min_periods=1
+                       )
+                       .mean()
+                  )
+              )
+
+              df[f"{stat}_std5"] = (
+                  group[stat].transform(
+                      lambda x:
+                      x.shift(1)
+                       .rolling(
+                           5,
+                           min_periods=2
+                       )
+                       .std()
+                  )
+              )
+
+          df["games_before"] = group.cumcount()
+
+          model_df = df[
+              df["games_before"] >= 3
+          ].copy()
+
+          # --------------------------------------------------
+          # FEATURE CONFIG
+          # --------------------------------------------------
+
+          feature_cols = [
+              "season",
+              "week",
+              "games_before",
+
+              "passing_yards_lag1",
+              "passing_yards_avg3",
+              "passing_yards_avg5",
+              "passing_yards_std5",
+
+              "rushing_yards_lag1",
+              "rushing_yards_avg3",
+              "rushing_yards_avg5",
+              "rushing_yards_std5",
+
+              "receiving_yards_lag1",
+              "receiving_yards_avg3",
+              "receiving_yards_avg5",
+              "receiving_yards_std5",
+
+              "receptions_lag1",
+              "receptions_avg3",
+              "receptions_avg5",
+              "receptions_std5",
+
+              "position",
+              "recent_team"
+          ]
+
+          numeric_features = [
+              x for x in feature_cols
+              if x not in [
+                  "position",
+                  "recent_team"
+              ]
+          ]
+
+          categorical_features = [
+              "position",
+              "recent_team"
+          ]
+
+          specs = {
+              "passing_yards": ["QB"],
+              "rushing_yards": [
+                  "QB", "RB", "WR"
+              ],
+              "receiving_yards": [
+                  "WR", "TE", "RB"
+              ],
+              "receptions": [
+                  "WR", "TE", "RB"
+              ]
+          }
+
+          # --------------------------------------------------
+          # CURRENT NYG / LA PLAYER ROWS
+          # --------------------------------------------------
+
+          current = (
+              model_df[
+                  model_df["season"] == 2026
+              ]
               .sort_values(
-                  ["season", "week"]
+                  ["player_id", "week"]
               )
-              .groupby(
-                  "player_id",
-                  as_index=False
-              )
+              .groupby("player_id")
               .tail(1)
               .copy()
           )
 
-          tonight_teams = set()
-
-          for game in games:
-              tonight_teams.add(
-                  game["away_team"]
-              )
-              tonight_teams.add(
-                  game["home_team"]
-              )
-
-          current_players = latest[
-              latest["recent_team"].isin(
-                  tonight_teams
-              )
-          ].copy()
-
-          skill_positions = [
-              "QB",
-              "RB",
-              "WR",
-              "TE"
-          ]
-
-          current_players = current_players[
-              current_players["position"].isin(
-                  skill_positions
+          current = current[
+              current["recent_team"].isin(
+                  ["NYG", "LA"]
               )
           ].copy()
 
           print(
-              "CURRENT SKILL PLAYERS FOUND:",
-              len(current_players)
+              "CURRENT NYG/LA PLAYERS:",
+              len(current)
           )
 
-          # -------------------------------------------------------
-          # 5. BUILD CURRENT PLAYER OBJECTS
-          # -------------------------------------------------------
-          players = []
-
-          for _, row in current_players.iterrows():
-
-              players.append({
-                  "player_id": str(
-                      row["player_id"]
-                  ),
-                  "player": str(
-                      row["player_display_name"]
-                  ),
-                  "position": str(
-                      row["position"]
-                  ),
-                  "team": str(
-                      row["recent_team"]
-                  ),
-                  "latest_data_season": int(
-                      row["season"]
-                  ),
-                  "latest_data_week": int(
-                      row["week"]
-                  )
-              })
-
-          players = sorted(
-              players,
-              key=lambda x: (
-                  x["team"],
-                  x["position"],
-                  x["player"]
+          if current.empty:
+              raise RuntimeError(
+                  "No current NYG/LA players found."
               )
-          )
 
-          # -------------------------------------------------------
-          # 6. PROVENANCE + GATES
-          # -------------------------------------------------------
-          latest_season = (
-              max(
-                  [
-                      p["latest_data_season"]
-                      for p in players
+          # --------------------------------------------------
+          # TRAIN + SIMULATE
+          # --------------------------------------------------
+
+          results = []
+
+          for target, positions in specs.items():
+
+              historical = model_df[
+                  model_df["position"].isin(
+                      positions
+                  )
+              ].copy()
+
+              if target == "passing_yards":
+                  historical = historical[
+                      historical["position"] == "QB"
+                  ]
+
+              historical = historical.sort_values(
+                  ["season", "week"]
+              ).reset_index(drop=True)
+
+              split = int(
+                  len(historical) * 0.80
+              )
+
+              fit_df = historical.iloc[
+                  :split
+              ].copy()
+
+              calibration_df = historical.iloc[
+                  split:
+              ].copy()
+
+              preprocessor = ColumnTransformer(
+                  transformers=[
+                      (
+                          "num",
+                          Pipeline(
+                              steps=[
+                                  (
+                                      "imputer",
+                                      SimpleImputer(
+                                          strategy="median"
+                                      )
+                                  ),
+                                  (
+                                      "scale",
+                                      StandardScaler()
+                                  )
+                              ]
+                          ),
+                          numeric_features
+                      ),
+                      (
+                          "cat",
+                          Pipeline(
+                              steps=[
+                                  (
+                                      "imputer",
+                                      SimpleImputer(
+                                          strategy="most_frequent"
+                                      )
+                                  ),
+                                  (
+                                      "onehot",
+                                      OneHotEncoder(
+                                          handle_unknown="ignore"
+                                      )
+                                  )
+                              ]
+                          ),
+                          categorical_features
+                      )
                   ]
               )
-              if players
-              else None
-          )
 
-          current_data_available = (
-              latest_season == 2026
-          )
+              model = Pipeline(
+                  steps=[
+                      (
+                          "prep",
+                          preprocessor
+                      ),
+                      (
+                          "model",
+                          Ridge(
+                              alpha=10.0
+                          )
+                      )
+                  ]
+              )
+
+              # Calibration fit
+              model.fit(
+                  fit_df[feature_cols],
+                  fit_df[target]
+              )
+
+              calibration_pred = model.predict(
+                  calibration_df[
+                      feature_cols
+                  ]
+              )
+
+              residuals = (
+                  calibration_df[
+                      target
+                  ].to_numpy(dtype=float)
+                  -
+                  calibration_pred
+              )
+
+              residuals = residuals[
+                  np.isfinite(residuals)
+              ]
+
+              if len(residuals) < 100:
+                  raise RuntimeError(
+                      f"Insufficient residuals: {target}"
+                  )
+
+              # Final fit on all historical data
+              model.fit(
+                  historical[feature_cols],
+                  historical[target]
+              )
+
+              eligible = current[
+                  current["position"].isin(
+                      positions
+                  )
+              ].copy()
+
+              if target == "passing_yards":
+                  eligible = eligible[
+                      eligible["position"] == "QB"
+                  ]
+
+              if eligible.empty:
+                  continue
+
+              projections = model.predict(
+                  eligible[feature_cols]
+              )
+
+              for i, (_, row) in enumerate(
+                  eligible.iterrows()
+              ):
+
+                  projection = max(
+                      0.0,
+                      float(projections[i])
+                  )
+
+                  sampled_errors = (
+                      np.random.choice(
+                          residuals,
+                          size=20000,
+                          replace=True
+                      )
+                  )
+
+                  sims = (
+                      projection
+                      + sampled_errors
+                  )
+
+                  sims = np.maximum(
+                      sims,
+                      0.0
+                  )
+
+                  result = {
+                      "player_id":
+                          str(row["player_id"]),
+
+                      "player":
+                          str(
+                              row[
+                                  "player_display_name"
+                              ]
+                          ),
+
+                      "team":
+                          str(
+                              row["recent_team"]
+                          ),
+
+                      "position":
+                          str(
+                              row["position"]
+                          ),
+
+                      "prop":
+                          target,
+
+                      "projection":
+                          round(
+                              projection,
+                              2
+                          ),
+
+                      "sim_mean":
+                          round(
+                              float(
+                                  np.mean(sims)
+                              ),
+                              2
+                          ),
+
+                      "median":
+                          round(
+                              float(
+                                  np.median(sims)
+                              ),
+                              2
+                          ),
+
+                      "p10":
+                          round(
+                              float(
+                                  np.percentile(
+                                      sims,
+                                      10
+                                  )
+                              ),
+                              2
+                          ),
+
+                      "p25":
+                          round(
+                              float(
+                                  np.percentile(
+                                      sims,
+                                      25
+                                  )
+                              ),
+                              2
+                          ),
+
+                      "p75":
+                          round(
+                              float(
+                                  np.percentile(
+                                      sims,
+                                      75
+                                  )
+                              ),
+                              2
+                          ),
+
+                      "p90":
+                          round(
+                              float(
+                                  np.percentile(
+                                      sims,
+                                      90
+                                  )
+                              ),
+                              2
+                          ),
+
+                      "simulations":
+                          20000,
+
+                      "latest_data_week":
+                          int(row["week"])
+                  }
+
+                  results.append(
+                      result
+                  )
+
+                  print(
+                      result["player"],
+                      "|",
+                      target,
+                      "| PROJ:",
+                      result["projection"],
+                      "| MEDIAN:",
+                      result["median"]
+                  )
+
+          # --------------------------------------------------
+          # REMOVE LOW-INFORMATION PLAYER/PROP COMBINATIONS
+          # --------------------------------------------------
+
+          filtered = []
+
+          for r in results:
+
+              if (
+                  r["prop"] == "passing_yards"
+                  and r["projection"] < 25
+              ):
+                  continue
+
+              if (
+                  r["prop"] == "rushing_yards"
+                  and r["projection"] < 3
+              ):
+                  continue
+
+              if (
+                  r["prop"] == "receiving_yards"
+                  and r["projection"] < 5
+              ):
+                  continue
+
+              if (
+                  r["prop"] == "receptions"
+                  and r["projection"] < 0.5
+              ):
+                  continue
+
+              filtered.append(r)
+
+          # --------------------------------------------------
+          # SAVE APP-FRIENDLY JSON
+          # --------------------------------------------------
 
           output = {
-              "status": (
-                  "READY"
-                  if current_data_available
-                  else "HOLD"
-              ),
-              "generated_at_utc": (
+              "status": "READY",
+              "game": "NYG @ LA",
+              "season": 2026,
+              "simulations_per_prop": 20000,
+              "generated_at_utc":
                   datetime.now(
                       timezone.utc
-                  ).isoformat()
-              ),
-              "target_date": "2026-09-21",
-              "source": "nflverse via nflreadpy",
-              "games": games,
-              "teams": sorted(
-                  list(tonight_teams)
-              ),
-              "players": players,
-              "gates": {
-                  "schedule_found": (
-                      len(games) > 0
-                  ),
-                  "players_found": (
-                      len(players) > 0
-                  ),
-                  "current_2026_player_data": (
-                      current_data_available
-                  ),
-                  "sportsbook_lines_connected": False,
-                  "predictions_unlocked": False
-              }
+                  ).isoformat(),
+              "sportsbook_lines_connected":
+                  False,
+              "projections": filtered
           }
 
           with open(
-              "data/jpro-current-game.json",
+              "data/jpro-current-projections.json",
               "w"
           ) as f:
               json.dump(
                   output,
                   f,
-                  indent=2,
-                  default=str
+                  indent=2
               )
 
           print("=" * 60)
-          print("JPRO CURRENT GAME LAYER COMPLETE")
-          print("GAMES:", len(games))
-          print("TEAMS:", ", ".join(sorted(tonight_teams)))
-          print("SKILL PLAYERS:", len(players))
+          print("JPRO CURRENT PROJECTIONS COMPLETE")
           print(
-              "LATEST PLAYER DATA SEASON:",
-              latest_season
+              "GAME:",
+              output["game"]
           )
           print(
-              "CURRENT 2026 PLAYER DATA:",
-              current_data_available
+              "CURRENT PROP PROJECTIONS:",
+              len(filtered)
           )
           print(
-              "PREDICTIONS:",
-              "LOCKED — CURRENT GAME LAYER ONLY"
+              "SIMULATIONS PER PROP:",
+              20000
           )
           print("=" * 60)
+
+          # Print a preview for GitHub Actions
+          print("")
+          print("JPRO PROJECTION PREVIEW")
+          print("-" * 60)
+
+          for r in filtered[:20]:
+              print(
+                  r["player"],
+                  "|",
+                  r["prop"],
+                  "| PROJ:",
+                  r["projection"],
+                  "| MEDIAN:",
+                  r["median"]
+              )
+
           PY
 
-      - name: Show current game
+      - name: Show JPro current projection status
         run: |
-          cat data/jpro-current-game.json
+          python - <<'PY'
+          import json
 
-      - name: Save current JPro game
+          with open(
+              "data/jpro-current-projections.json"
+          ) as f:
+              d = json.load(f)
+
+          print("STATUS:", d["status"])
+          print("GAME:", d["game"])
+          print(
+              "PROJECTIONS:",
+              len(d["projections"])
+          )
+          print(
+              "SIMULATIONS EACH:",
+              d["simulations_per_prop"]
+          )
+
+          print("")
+          print("FIRST JPRO NUMBERS:")
+          print("=" * 50)
+
+          for x in d["projections"][:15]:
+              print(
+                  x["player"],
+                  "|",
+                  x["prop"],
+                  "|",
+                  x["projection"],
+                  "| median",
+                  x["median"]
+              )
+          PY
+
+      - name: Save current JPro projections
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: current game layer"
-          file_pattern: data/jpro-current-game.json
+          commit_message: "JPro: current 20K projections"
+          file_pattern: data/jpro-current-projections.json
