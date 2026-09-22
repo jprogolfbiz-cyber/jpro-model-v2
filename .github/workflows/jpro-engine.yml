@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install nflreadpy pandas numpy scikit-learn pyarrow
 
-      - name: Build JPro full slate
+      - name: Build JPro role intelligence
         run: |
           mkdir -p data
 
@@ -42,7 +42,7 @@ jobs:
           from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
           # ==================================================
-          # JPRO SETTINGS
+          # SETTINGS
           # ==================================================
 
           np.random.seed(20260922)
@@ -52,19 +52,12 @@ jobs:
           SIMS = 20000
 
           print("=" * 70)
-          print("JPRO MODEL V2 — FULL SLATE ENGINE")
+          print("JPRO MODEL V2 — ROLE INTELLIGENCE ENGINE")
           print("=" * 70)
 
-          print("SEASON:", SEASON)
-          print("WEEK:", WEEK)
-          print("SIMULATIONS PER PROP:", SIMS)
-
           # ==================================================
-          # LOAD 2026 NFL SCHEDULE
+          # SCHEDULE
           # ==================================================
-
-          print("")
-          print("LOADING NFL SCHEDULE...")
 
           schedule = nfl.load_schedules([SEASON])
 
@@ -72,9 +65,6 @@ jobs:
               schedule = schedule.to_pandas()
 
           schedule = pd.DataFrame(schedule)
-
-          print("SCHEDULE ROWS:", len(schedule))
-          print("SCHEDULE COLUMNS:", list(schedule.columns))
 
           required_schedule = [
               "season",
@@ -84,14 +74,13 @@ jobs:
           ]
 
           missing_schedule = [
-              c
-              for c in required_schedule
+              c for c in required_schedule
               if c not in schedule.columns
           ]
 
           if missing_schedule:
               raise RuntimeError(
-                  f"Schedule missing columns: {missing_schedule}"
+                  f"Missing schedule columns: {missing_schedule}"
               )
 
           schedule["season"] = pd.to_numeric(
@@ -109,13 +98,17 @@ jobs:
               (schedule["week"] == WEEK)
           ].copy()
 
-          # Keep regular-season rows if game_type exists.
           if "game_type" in week_games.columns:
 
               regular = week_games[
-                  week_games["game_type"].astype(str).str.upper().isin(
-                      ["REG", "REGULAR", "REGULAR SEASON"]
-                  )
+                  week_games["game_type"]
+                  .astype(str)
+                  .str.upper()
+                  .isin([
+                      "REG",
+                      "REGULAR",
+                      "REGULAR SEASON"
+                  ])
               ].copy()
 
               if not regular.empty:
@@ -130,23 +123,12 @@ jobs:
 
           if week_games.empty:
               raise RuntimeError(
-                  f"No games found for {SEASON} Week {WEEK}"
+                  "No Week 3 games found."
               )
-
-          print("")
-          print(
-              "WEEK",
-              WEEK,
-              "GAMES FOUND:",
-              len(week_games)
-          )
-
-          # ==================================================
-          # BUILD GAME MAP
-          # ==================================================
 
           games = []
           team_to_game = {}
+          team_to_opponent = {}
 
           for _, row in week_games.iterrows():
 
@@ -195,28 +177,21 @@ jobs:
               team_to_game[away] = game_name
               team_to_game[home] = game_name
 
-              print("GAME:", game_name)
+              team_to_opponent[away] = home
+              team_to_opponent[home] = away
 
           slate_teams = sorted(
               team_to_game.keys()
           )
 
-          print("")
           print(
-              "SLATE TEAMS:",
-              len(slate_teams)
-          )
-
-          print(
-              ", ".join(slate_teams)
+              "GAMES FOUND:",
+              len(games)
           )
 
           # ==================================================
-          # LOAD REAL NFL PLAYER DATA
+          # PLAYER DATA
           # ==================================================
-
-          print("")
-          print("LOADING NFL PLAYER DATA...")
 
           df = nfl.load_player_stats(
               [2022, 2023, 2024, 2025, 2026]
@@ -250,14 +225,13 @@ jobs:
           ] + targets
 
           missing = [
-              c
-              for c in required
+              c for c in required
               if c not in df.columns
           ]
 
           if missing:
               raise RuntimeError(
-                  f"Missing required player columns: {missing}"
+                  f"Missing player columns: {missing}"
               )
 
           for col in targets:
@@ -303,16 +277,27 @@ jobs:
           )
 
           print(
-              "REAL NFL PLAYER ROWS:",
+              "REAL NFL ROWS:",
               len(df)
           )
 
           # ==================================================
-          # LEAKAGE-SAFE PLAYER FEATURES
+          # PREGAME DATA SNAPSHOT
           # ==================================================
 
-          print("")
-          print("BUILDING LEAKAGE-SAFE FEATURES...")
+          pregame_2026 = df[
+              (df["season"] == SEASON) &
+              (df["week"] < WEEK)
+          ].copy()
+
+          print(
+              "2026 PREGAME ROWS:",
+              len(pregame_2026)
+          )
+
+          # ==================================================
+          # LEAKAGE-SAFE FEATURES
+          # ==================================================
 
           group = df.groupby(
               "player_id",
@@ -369,11 +354,6 @@ jobs:
               df["games_before"] >= 3
           ].copy()
 
-          print(
-              "MODEL ROWS:",
-              len(model_df)
-          )
-
           # ==================================================
           # MODEL FEATURES
           # ==================================================
@@ -408,8 +388,7 @@ jobs:
           ]
 
           numeric_features = [
-              x
-              for x in feature_cols
+              x for x in feature_cols
               if x not in [
                   "position",
                   "recent_team"
@@ -422,10 +401,7 @@ jobs:
           ]
 
           specs = {
-
-              "passing_yards": [
-                  "QB"
-              ],
+              "passing_yards": ["QB"],
 
               "rushing_yards": [
                   "QB",
@@ -447,18 +423,8 @@ jobs:
           }
 
           # ==================================================
-          # CURRENT WEEK PLAYER STATE
+          # CURRENT PLAYER STATE
           # ==================================================
-
-          #
-          # IMPORTANT:
-          #
-          # We use each player's latest available 2026 row
-          # BEFORE Week 3 as the state used to project Week 3.
-          #
-          # This prevents Week 3 results from leaking into
-          # Week 3 projections if the workflow is rerun later.
-          #
 
           current_pool = model_df[
               (model_df["season"] == SEASON) &
@@ -467,20 +433,16 @@ jobs:
 
           if current_pool.empty:
               raise RuntimeError(
-                  "No pre-Week-3 player state found."
+                  "No pregame player state found."
               )
 
           current = (
               current_pool
-              .sort_values(
-                  [
-                      "player_id",
-                      "week"
-                  ]
-              )
-              .groupby(
-                  "player_id"
-              )
+              .sort_values([
+                  "player_id",
+                  "week"
+              ])
+              .groupby("player_id")
               .tail(1)
               .copy()
           )
@@ -496,25 +458,389 @@ jobs:
               .map(team_to_game)
           )
 
+          current["opponent"] = (
+              current["recent_team"]
+              .map(team_to_opponent)
+          )
+
           current = current.dropna(
               subset=[
-                  "game"
+                  "game",
+                  "opponent"
               ]
           ).copy()
 
-          print("")
           print(
               "CURRENT SLATE PLAYERS:",
               len(current)
           )
 
-          if current.empty:
-              raise RuntimeError(
-                  "No current players matched the Week 3 slate."
+          # ==================================================
+          # ROLE INTELLIGENCE
+          # ==================================================
+
+          print("")
+          print("=" * 70)
+          print("BUILDING PLAYER ROLE INTELLIGENCE")
+          print("=" * 70)
+
+          def safe_float(value):
+
+              try:
+
+                  value = float(value)
+
+                  if np.isfinite(value):
+                      return value
+
+              except:
+                  pass
+
+              return 0.0
+
+          def round2(value):
+
+              return round(
+                  safe_float(value),
+                  2
               )
 
+          def role_label(score):
+
+              if score >= 80:
+                  return "FEATURED"
+
+              if score >= 65:
+                  return "STRONG"
+
+              if score >= 50:
+                  return "STABLE"
+
+              if score >= 35:
+                  return "ROTATIONAL"
+
+              return "LIMITED"
+
+          def player_role(
+              player_id,
+              team,
+              position
+          ):
+
+              history = pregame_2026[
+                  pregame_2026["player_id"]
+                  == player_id
+              ].sort_values(
+                  "week"
+              ).copy()
+
+              if history.empty:
+
+                  return {
+                      "role_score": 0,
+                      "role_label": "UNKNOWN",
+                      "games_sample": 0
+                  }
+
+              latest = history.tail(1)
+              recent = history.tail(3)
+
+              role = {
+                  "games_sample":
+                      int(len(history))
+              }
+
+              # ----------------------------------------------
+              # PRODUCTION PROFILE
+              # ----------------------------------------------
+
+              for stat in targets:
+
+                  values = history[
+                      stat
+                  ].to_numpy(
+                      dtype=float
+                  )
+
+                  recent_values = recent[
+                      stat
+                  ].to_numpy(
+                      dtype=float
+                  )
+
+                  season_avg = (
+                      float(
+                          np.mean(values)
+                      )
+                      if len(values)
+                      else 0.0
+                  )
+
+                  recent_avg = (
+                      float(
+                          np.mean(recent_values)
+                      )
+                      if len(recent_values)
+                      else 0.0
+                  )
+
+                  last_game = (
+                      float(
+                          values[-1]
+                      )
+                      if len(values)
+                      else 0.0
+                  )
+
+                  consistency = (
+                      float(
+                          np.std(recent_values)
+                      )
+                      if len(recent_values) > 1
+                      else 0.0
+                  )
+
+                  trend = (
+                      recent_avg -
+                      season_avg
+                  )
+
+                  role[
+                      f"{stat}_season_avg"
+                  ] = round2(
+                      season_avg
+                  )
+
+                  role[
+                      f"{stat}_recent_avg"
+                  ] = round2(
+                      recent_avg
+                  )
+
+                  role[
+                      f"{stat}_last_game"
+                  ] = round2(
+                      last_game
+                  )
+
+                  role[
+                      f"{stat}_recent_std"
+                  ] = round2(
+                      consistency
+                  )
+
+                  role[
+                      f"{stat}_trend"
+                  ] = round2(
+                      trend
+                  )
+
+              # ----------------------------------------------
+              # TEAM PRODUCTION SHARE
+              # ----------------------------------------------
+
+              team_history = pregame_2026[
+                  pregame_2026["recent_team"]
+                  == team
+              ].copy()
+
+              team_weeks = sorted(
+                  history["week"]
+                  .dropna()
+                  .unique()
+                  .tolist()
+              )
+
+              team_history = team_history[
+                  team_history["week"].isin(
+                      team_weeks
+                  )
+              ].copy()
+
+              for stat in targets:
+
+                  player_total = safe_float(
+                      history[stat].sum()
+                  )
+
+                  team_total = safe_float(
+                      team_history[stat].sum()
+                  )
+
+                  share = (
+                      player_total /
+                      team_total
+                      if team_total > 0
+                      else 0.0
+                  )
+
+                  role[
+                      f"{stat}_team_share"
+                  ] = round2(
+                      share
+                  )
+
+              # ----------------------------------------------
+              # POSITION-SPECIFIC ROLE SCORE
+              # ----------------------------------------------
+
+              if position == "QB":
+
+                  pass_avg = role[
+                      "passing_yards_recent_avg"
+                  ]
+
+                  rush_avg = role[
+                      "rushing_yards_recent_avg"
+                  ]
+
+                  pass_share = role[
+                      "passing_yards_team_share"
+                  ]
+
+                  score = (
+                      min(
+                          pass_avg / 300,
+                          1
+                      ) * 45
+                      +
+                      min(
+                          pass_share,
+                          1
+                      ) * 40
+                      +
+                      min(
+                          rush_avg / 50,
+                          1
+                      ) * 15
+                  )
+
+              elif position == "RB":
+
+                  rush_avg = role[
+                      "rushing_yards_recent_avg"
+                  ]
+
+                  rec_avg = role[
+                      "receiving_yards_recent_avg"
+                  ]
+
+                  receptions_avg = role[
+                      "receptions_recent_avg"
+                  ]
+
+                  rush_share = role[
+                      "rushing_yards_team_share"
+                  ]
+
+                  score = (
+                      min(
+                          rush_avg / 100,
+                          1
+                      ) * 35
+                      +
+                      min(
+                          rush_share / .70,
+                          1
+                      ) * 30
+                      +
+                      min(
+                          rec_avg / 50,
+                          1
+                      ) * 20
+                      +
+                      min(
+                          receptions_avg / 5,
+                          1
+                      ) * 15
+                  )
+
+              elif position in [
+                  "WR",
+                  "TE"
+              ]:
+
+                  rec_yards = role[
+                      "receiving_yards_recent_avg"
+                  ]
+
+                  receptions = role[
+                      "receptions_recent_avg"
+                  ]
+
+                  rec_share = role[
+                      "receiving_yards_team_share"
+                  ]
+
+                  score = (
+                      min(
+                          rec_yards / 100,
+                          1
+                      ) * 40
+                      +
+                      min(
+                          receptions / 8,
+                          1
+                      ) * 30
+                      +
+                      min(
+                          rec_share / .40,
+                          1
+                      ) * 30
+                  )
+
+              else:
+
+                  score = 0.0
+
+              score = max(
+                  0.0,
+                  min(
+                      100.0,
+                      score
+                  )
+              )
+
+              role["role_score"] = round(
+                  score,
+                  1
+              )
+
+              role["role_label"] = role_label(
+                  score
+              )
+
+              return role
+
+          role_cache = {}
+
+          for _, row in current.iterrows():
+
+              player_id = str(
+                  row["player_id"]
+              )
+
+              team = str(
+                  row["recent_team"]
+              )
+
+              position = str(
+                  row["position"]
+              )
+
+              role_cache[player_id] = player_role(
+                  player_id,
+                  team,
+                  position
+              )
+
+          print(
+              "ROLE PROFILES:",
+              len(role_cache)
+          )
+
           # ==================================================
-          # PREPROCESSOR FACTORY
+          # MODEL FACTORY
           # ==================================================
 
           def make_model():
@@ -578,10 +904,12 @@ jobs:
               )
 
           # ==================================================
-          # COMPRESS 20K DISTRIBUTION
+          # DISTRIBUTION COMPRESSION
           # ==================================================
 
-          def compress_distribution(sims):
+          def compress_distribution(
+              sims
+          ):
 
               values, counts = np.unique(
                   sims,
@@ -594,25 +922,28 @@ jobs:
                       int(count)
                   ]
                   for value, count
-                  in zip(values, counts)
+                  in zip(
+                      values,
+                      counts
+                  )
               ]
 
-              if (
-                  sum(
-                      count
-                      for _, count
-                      in histogram
-                  )
-                  != SIMS
-              ):
+              represented = sum(
+                  count
+                  for _, count
+                  in histogram
+              )
+
+              if represented != SIMS:
+
                   raise RuntimeError(
-                      "Histogram compression lost simulations."
+                      "Histogram compression failed."
                   )
 
               return histogram
 
           # ==================================================
-          # TRAIN + SIMULATE FULL SLATE
+          # TRAIN + SIMULATE
           # ==================================================
 
           results = []
@@ -621,29 +952,27 @@ jobs:
 
               print("")
               print("-" * 70)
-              print("BUILDING:", target)
+              print(
+                  "MODELING:",
+                  target
+              )
               print("-" * 70)
 
               historical = model_df[
-                  model_df["position"].isin(
-                      positions
-                  )
+                  model_df["position"]
+                  .isin(positions)
               ].copy()
-
-              #
-              # Do not train on the target week or later.
-              # This keeps this Week 3 snapshot genuinely
-              # pregame even if future data becomes available.
-              #
 
               historical = historical[
                   (
                       historical["season"] < SEASON
-                  ) |
+                  )
+                  |
                   (
                       (
                           historical["season"] == SEASON
-                      ) &
+                      )
+                      &
                       (
                           historical["week"] < WEEK
                       )
@@ -653,7 +982,8 @@ jobs:
               if target == "passing_yards":
 
                   historical = historical[
-                      historical["position"] == "QB"
+                      historical["position"]
+                      == "QB"
                   ].copy()
 
               historical = historical.sort_values(
@@ -666,13 +996,14 @@ jobs:
               )
 
               if len(historical) < 200:
+
                   raise RuntimeError(
-                      f"Not enough historical rows for {target}"
+                      f"Insufficient history for {target}"
                   )
 
               split = int(
                   len(historical) *
-                  0.80
+                  .80
               )
 
               fit_df = historical.iloc[
@@ -683,21 +1014,9 @@ jobs:
                   split:
               ].copy()
 
-              if (
-                  fit_df.empty
-                  or calibration_df.empty
-              ):
-                  raise RuntimeError(
-                      f"Invalid train/calibration split for {target}"
-                  )
+              calibration_model = make_model()
 
-              # ----------------------------------------------
-              # CALIBRATION MODEL
-              # ----------------------------------------------
-
-              model = make_model()
-
-              model.fit(
+              calibration_model.fit(
                   fit_df[
                       feature_cols
                   ],
@@ -706,10 +1025,12 @@ jobs:
                   ]
               )
 
-              calibration_pred = model.predict(
-                  calibration_df[
-                      feature_cols
-                  ]
+              calibration_pred = (
+                  calibration_model.predict(
+                      calibration_df[
+                          feature_cols
+                      ]
+                  )
               )
 
               residuals = (
@@ -729,30 +1050,10 @@ jobs:
               ]
 
               if len(residuals) < 100:
+
                   raise RuntimeError(
                       f"Insufficient residuals for {target}"
                   )
-
-              print(
-                  "CALIBRATION RESIDUALS:",
-                  len(residuals)
-              )
-
-              print(
-                  "RESIDUAL STD:",
-                  round(
-                      float(
-                          np.std(
-                              residuals
-                          )
-                      ),
-                      3
-                  )
-              )
-
-              # ----------------------------------------------
-              # FINAL MODEL
-              # ----------------------------------------------
 
               final_model = make_model()
 
@@ -766,23 +1067,18 @@ jobs:
               )
 
               eligible = current[
-                  current["position"].isin(
-                      positions
-                  )
+                  current["position"]
+                  .isin(positions)
               ].copy()
 
               if target == "passing_yards":
 
                   eligible = eligible[
-                      eligible["position"] == "QB"
+                      eligible["position"]
+                      == "QB"
                   ].copy()
 
               if eligible.empty:
-
-                  print(
-                      "NO ELIGIBLE PLAYERS"
-                  )
-
                   continue
 
               projections = final_model.predict(
@@ -790,8 +1086,6 @@ jobs:
                       feature_cols
                   ]
               )
-
-              retained = 0
 
               for i, (_, row) in enumerate(
                   eligible.iterrows()
@@ -805,41 +1099,35 @@ jobs:
                   )
 
                   # ------------------------------------------
-                  # REMOVE LOW-INFORMATION PROPS
-                  # BEFORE SPENDING SPACE ON OUTPUT
+                  # LOW-INFORMATION FILTER
                   # ------------------------------------------
-
-                  keep = True
 
                   if (
                       target == "passing_yards"
                       and projection < 25
                   ):
-                      keep = False
+                      continue
 
                   if (
                       target == "rushing_yards"
                       and projection < 3
                   ):
-                      keep = False
+                      continue
 
                   if (
                       target == "receiving_yards"
                       and projection < 5
                   ):
-                      keep = False
+                      continue
 
                   if (
                       target == "receptions"
-                      and projection < 0.5
+                      and projection < .5
                   ):
-                      keep = False
-
-                  if not keep:
                       continue
 
                   # ------------------------------------------
-                  # 20,000 EMPIRICAL SIMULATIONS
+                  # 20K SIMULATIONS
                   # ------------------------------------------
 
                   sampled_errors = np.random.choice(
@@ -856,7 +1144,7 @@ jobs:
 
                   sims = np.maximum(
                       sims,
-                      0.0
+                      0
                   )
 
                   sims = np.rint(
@@ -869,16 +1157,22 @@ jobs:
                       sims
                   )
 
-                  game_name = str(
-                      row["game"]
+                  player_id = str(
+                      row["player_id"]
+                  )
+
+                  role = role_cache.get(
+                      player_id,
+                      {}
+                  )
+
+                  team = str(
+                      row["recent_team"]
                   )
 
                   result = {
-
                       "player_id":
-                          str(
-                              row["player_id"]
-                          ),
+                          player_id,
 
                       "player":
                           str(
@@ -888,21 +1182,22 @@ jobs:
                           ),
 
                       "team":
+                          team,
+
+                      "opponent":
                           str(
-                              row[
-                                  "recent_team"
-                              ]
+                              row["opponent"]
                           ),
 
                       "position":
                           str(
-                              row[
-                                  "position"
-                              ]
+                              row["position"]
                           ),
 
                       "game":
-                          game_name,
+                          str(
+                              row["game"]
+                          ),
 
                       "prop":
                           target,
@@ -916,9 +1211,7 @@ jobs:
                       "sim_mean":
                           round(
                               float(
-                                  np.mean(
-                                      sims
-                                  )
+                                  np.mean(sims)
                               ),
                               2
                           ),
@@ -926,9 +1219,7 @@ jobs:
                       "median":
                           round(
                               float(
-                                  np.median(
-                                      sims
-                                  )
+                                  np.median(sims)
                               ),
                               2
                           ),
@@ -985,43 +1276,19 @@ jobs:
 
                       "latest_data_week":
                           int(
-                              row[
-                                  "week"
-                              ]
-                          )
+                              row["week"]
+                          ),
+
+                      "role":
+                          role
                   }
 
                   results.append(
                       result
                   )
 
-                  retained += 1
-
-                  print(
-                      result["player"],
-                      "|",
-                      result["team"],
-                      "|",
-                      game_name,
-                      "|",
-                      target,
-                      "| PROJ:",
-                      result["projection"],
-                      "| MEDIAN:",
-                      result["median"],
-                      "| HIST BINS:",
-                      len(histogram)
-                  )
-
-              print(
-                  "RETAINED",
-                  target,
-                  "PROPS:",
-                  retained
-              )
-
           # ==================================================
-          # SORT OUTPUT
+          # SORT RESULTS
           # ==================================================
 
           game_order = {
@@ -1053,16 +1320,15 @@ jobs:
           )
 
           # ==================================================
-          # OUTPUT JSON
+          # OUTPUT
           # ==================================================
 
           output = {
-
               "status":
                   "READY",
 
               "engine_version":
-                  "JPRO_FULL_SLATE_V1",
+                  "JPRO_ROLE_INTELLIGENCE_V1",
 
               "season":
                   SEASON,
@@ -1086,6 +1352,9 @@ jobs:
 
               "distribution_format":
                   "COMPRESSED_EMPIRICAL_HISTOGRAM",
+
+              "role_intelligence":
+                  True,
 
               "generated_at_utc":
                   datetime.now(
@@ -1116,19 +1385,10 @@ jobs:
                   )
               )
 
-          # ==================================================
-          # SUMMARY
-          # ==================================================
-
           print("")
           print("=" * 70)
-          print("JPRO FULL SLATE READY")
+          print("JPRO ROLE INTELLIGENCE READY")
           print("=" * 70)
-
-          print(
-              "SLATE:",
-              output["slate"]
-          )
 
           print(
               "GAMES:",
@@ -1141,20 +1401,20 @@ jobs:
           )
 
           print(
-              "SIMULATIONS PER PROP:",
-              SIMS
+              "ROLE PROFILES:",
+              len(role_cache)
           )
 
           print(
-              "EMPIRICAL OUTCOMES REPRESENTED:",
-              len(results) * SIMS
+              "SIMS PER PROP:",
+              SIMS
           )
 
           print("=" * 70)
 
           PY
 
-      - name: Verify JPro full slate
+      - name: Verify JPro role intelligence
         run: |
           python <<'PY'
           import json
@@ -1165,83 +1425,75 @@ jobs:
               "data/jpro-current-projections.json"
           ) as f:
 
-              d = json.load(
-                  f
-              )
+              d = json.load(f)
 
           print("=" * 70)
-          print("JPRO FULL SLATE AUDIT")
+          print("JPRO ROLE INTELLIGENCE AUDIT")
           print("=" * 70)
 
           print(
-              "STATUS:",
-              d["status"]
+              "ENGINE:",
+              d.get(
+                  "engine_version"
+              )
           )
 
           print(
               "SLATE:",
-              d["slate"]
+              d.get(
+                  "slate"
+              )
           )
 
           print(
               "GAMES:",
               len(
-                  d["games"]
+                  d.get(
+                      "games",
+                      []
+                  )
               )
           )
 
           print(
               "PLAYER PROPS:",
               len(
-                  d["projections"]
+                  d.get(
+                      "projections",
+                      []
+                  )
               )
           )
 
-          print(
-              "SIMULATIONS EACH:",
-              d[
-                  "simulations_per_prop"
-              ]
+          if not d.get(
+              "role_intelligence"
+          ):
+
+              raise RuntimeError(
+                  "Role intelligence flag missing."
+              )
+
+          projections = d.get(
+              "projections",
+              []
           )
 
-          if (
-              not d["games"]
-          ):
+          if not projections:
+
               raise RuntimeError(
-                  "No games in output."
+                  "No projections."
               )
 
-          if (
-              not d["projections"]
-          ):
-              raise RuntimeError(
-                  "No projections in output."
-              )
+          role_count = 0
 
-          print("")
-          print("GAMES")
-          print("-" * 70)
-
-          for game in d["games"]:
-
-              print(
-                  game["game"]
-              )
-
-          print("")
-          print("DISTRIBUTION PREVIEW")
-          print("-" * 70)
-
-          for x in d[
-              "projections"
-          ][:20]:
+          for x in projections:
 
               histogram = x.get(
                   "simulation_histogram",
                   []
               )
 
-              stored = sum(
+              represented = sum(
                   int(
                       entry[1]
                   )
@@ -1249,38 +1501,100 @@ jobs:
                   in histogram
               )
 
+              if represented != SIMS:
+
+                  raise RuntimeError(
+                      "20K distribution mismatch."
+                  )
+
+              role = x.get(
+                  "role",
+                  {}
+              )
+
+              if (
+                  "role_score" in role
+                  and
+                  "role_label" in role
+              ):
+                  role_count += 1
+
+          if role_count == 0:
+
+              raise RuntimeError(
+                  "No role profiles attached."
+              )
+
+          print(
+              "PROPS WITH ROLE DATA:",
+              role_count
+          )
+
+          print("")
+          print("ROLE PREVIEW")
+          print("-" * 70)
+
+          shown = set()
+
+          for x in projections:
+
+              player_id = x[
+                  "player_id"
+              ]
+
+              if player_id in shown:
+                  continue
+
+              shown.add(
+                  player_id
+              )
+
+              role = x.get(
+                  "role",
+                  {}
+              )
+
               print(
                   x["player"],
                   "|",
                   x["team"],
+                  "vs",
+                  x["opponent"],
                   "|",
-                  x["game"],
-                  "|",
-                  x["prop"],
-                  "| PROJ:",
-                  x["projection"],
-                  "| MEDIAN:",
-                  x["median"],
-                  "| REPRESENTED SIMS:",
-                  stored
+                  x["position"],
+                  "| ROLE:",
+                  role.get(
+                      "role_label"
+                  ),
+                  role.get(
+                      "role_score"
+                  ),
+                  "| REC YDS AVG:",
+                  role.get(
+                      "receiving_yards_recent_avg"
+                  ),
+                  "| RUSH YDS AVG:",
+                  role.get(
+                      "rushing_yards_recent_avg"
+                  ),
+                  "| PASS YDS AVG:",
+                  role.get(
+                      "passing_yards_recent_avg"
+                  )
               )
 
-              if (
-                  stored != SIMS
-              ):
-                  raise RuntimeError(
-                      "Compressed simulation count mismatch."
-                  )
+              if len(shown) >= 20:
+                  break
 
           print("")
           print(
-              "JPRO FULL SLATE AUDIT PASSED"
+              "JPRO ROLE INTELLIGENCE AUDIT PASSED"
           )
 
           PY
 
-      - name: Save JPro full slate
+      - name: Save JPro role intelligence
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: build Week 3 full slate"
+          commit_message: "JPro: add player role intelligence"
           file_pattern: data/jpro-current-projections.json
