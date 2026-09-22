@@ -17,12 +17,206 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
       - name: Install JPro tools
         run: |
           python -m pip install --upgrade pip
-          pip install nflreadpy pandas numpy scikit-learn pyarrow
+          pip install nflreadpy pandas numpy scikit-learn
+
+      # ============================================================
+      # 3D-1
+      # OPPORTUNITY / USAGE DATA AUDIT
+      # ============================================================
+
+      - name: Audit JPro opportunity data
+        run: |
+          python <<'PY'
+          import pandas as pd
+          import nflreadpy as nfl
+
+          print("=" * 72)
+          print("JPRO OPPORTUNITY DATA AUDIT")
+          print("=" * 72)
+
+          df = nfl.load_player_stats([2025, 2026])
+
+          if hasattr(df, "to_pandas"):
+              df = df.to_pandas()
+
+          df = pd.DataFrame(df)
+
+          print("")
+          print("ROWS:", len(df))
+          print("COLUMNS:", len(df.columns))
+
+          wanted = [
+              "player_id",
+              "player_display_name",
+              "player_name",
+              "position",
+              "position_group",
+              "team",
+              "recent_team",
+              "season",
+              "week",
+
+              "attempts",
+              "completions",
+              "passing_attempts",
+
+              "carries",
+              "rushing_attempts",
+
+              "targets",
+              "receptions",
+
+              "target_share",
+              "air_yards",
+              "air_yards_share",
+              "receiving_air_yards",
+              "wopr",
+
+              "rushing_yards",
+              "receiving_yards",
+              "passing_yards",
+
+              "rushing_tds",
+              "receiving_tds",
+              "passing_tds",
+
+              "fantasy_points",
+              "fantasy_points_ppr"
+          ]
+
+          print("")
+          print("=" * 72)
+          print("AVAILABLE OPPORTUNITY COLUMNS")
+          print("=" * 72)
+
+          for col in wanted:
+              if col in df.columns:
+                  print("YES :", col)
+              else:
+                  print("NO  :", col)
+
+          print("")
+          print("=" * 72)
+          print("OTHER POSSIBLE USAGE COLUMNS")
+          print("=" * 72)
+
+          keywords = [
+              "target",
+              "attempt",
+              "carr",
+              "snap",
+              "route",
+              "share",
+              "air_yard",
+              "touch",
+              "red_zone",
+              "inside",
+              "goal",
+              "rush",
+              "receiv"
+          ]
+
+          extra = []
+
+          for col in df.columns:
+              lower = str(col).lower()
+
+              if any(
+                  keyword in lower
+                  for keyword in keywords
+              ):
+                  extra.append(col)
+
+          for col in sorted(set(extra)):
+              print(col)
+
+          print("")
+          print("=" * 72)
+          print("DRAKE LONDON SAMPLE")
+          print("=" * 72)
+
+          name_col = None
+
+          for candidate in [
+              "player_display_name",
+              "player_name"
+          ]:
+              if candidate in df.columns:
+                  name_col = candidate
+                  break
+
+          if name_col is None:
+              print("No player-name column found.")
+
+          else:
+              drake = df[
+                  df[name_col]
+                  .astype(str)
+                  .str.contains(
+                      "Drake London",
+                      case=False,
+                      na=False
+                  )
+              ].copy()
+
+              preview_cols = [
+                  col for col in [
+                      "season",
+                      "week",
+                      name_col,
+                      "position",
+                      "team",
+                      "recent_team",
+                      "targets",
+                      "receptions",
+                      "receiving_yards",
+                      "air_yards",
+                      "receiving_air_yards",
+                      "target_share",
+                      "air_yards_share",
+                      "wopr",
+                      "carries",
+                      "rushing_attempts",
+                      "rushing_yards"
+                  ]
+                  if col in drake.columns
+              ]
+
+              if drake.empty:
+                  print("Drake London not found.")
+
+              else:
+                  sort_cols = [
+                      col
+                      for col in ["season", "week"]
+                      if col in drake.columns
+                  ]
+
+                  if sort_cols:
+                      drake = drake.sort_values(sort_cols)
+
+                  print(
+                      drake[preview_cols]
+                      .tail(12)
+                      .to_string(index=False)
+                  )
+
+          print("")
+          print("=" * 72)
+          print("JPRO OPPORTUNITY AUDIT COMPLETE")
+          print("=" * 72)
+
+          PY
+
+      # ============================================================
+      # BUILD JPRO ENGINE
+      # FULL SLATE + 20K SIMS + ROLE + MATCHUP INTELLIGENCE
+      # ============================================================
 
       - name: Build JPro matchup intelligence
         run: |
@@ -30,251 +224,500 @@ jobs:
 
           python <<'PY'
           import json
+          import math
+          import warnings
+
           import numpy as np
           import pandas as pd
           import nflreadpy as nfl
 
-          from datetime import datetime, timezone
-          from sklearn.compose import ColumnTransformer
-          from sklearn.impute import SimpleImputer
           from sklearn.linear_model import Ridge
+          from sklearn.preprocessing import StandardScaler
           from sklearn.pipeline import Pipeline
-          from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-          # ==================================================
-          # SETTINGS
-          # ==================================================
-
-          np.random.seed(20260922)
+          warnings.filterwarnings("ignore")
 
           SEASON = 2026
           WEEK = 3
           SIMS = 20000
+          RNG = np.random.default_rng(42)
 
           print("=" * 72)
-          print("JPRO MODEL V2 — MATCHUP INTELLIGENCE ENGINE")
+          print("JPRO MATCHUP INTELLIGENCE ENGINE")
           print("=" * 72)
+          print("Season:", SEASON)
+          print("Week:", WEEK)
+          print("Simulations:", SIMS)
 
-          # ==================================================
-          # LOAD SCHEDULE
-          # ==================================================
+          # ========================================================
+          # HELPERS
+          # ========================================================
 
-          schedule = nfl.load_schedules(
-              [2022, 2023, 2024, 2025, 2026]
-          )
+          def to_pandas(obj):
+              if hasattr(obj, "to_pandas"):
+                  return obj.to_pandas()
 
-          if hasattr(schedule, "to_pandas"):
-              schedule = schedule.to_pandas()
+              return pd.DataFrame(obj)
 
-          schedule = pd.DataFrame(schedule)
 
-          required_schedule = [
-              "season",
-              "week",
-              "away_team",
-              "home_team"
-          ]
+          def clean_number(value, default=0.0):
+              try:
+                  value = float(value)
 
-          missing_schedule = [
-              c for c in required_schedule
-              if c not in schedule.columns
-          ]
+                  if math.isnan(value):
+                      return default
 
-          if missing_schedule:
-              raise RuntimeError(
-                  f"Missing schedule columns: {missing_schedule}"
+                  if math.isinf(value):
+                      return default
+
+                  return value
+
+              except Exception:
+                  return default
+
+
+          def clean_int(value, default=0):
+              try:
+                  return int(value)
+
+              except Exception:
+                  return default
+
+
+          def first_existing(columns, choices):
+              for choice in choices:
+                  if choice in columns:
+                      return choice
+
+              return None
+
+
+          def normalize_team(value):
+              if pd.isna(value):
+                  return ""
+
+              return str(value).strip().upper()
+
+
+          def percentile(values, pct):
+              if len(values) == 0:
+                  return 0.0
+
+              return float(
+                  np.percentile(
+                      values,
+                      pct
+                  )
               )
 
-          schedule["season"] = pd.to_numeric(
-              schedule["season"],
-              errors="coerce"
+
+          def compress_histogram(values):
+              unique, counts = np.unique(
+                  values.astype(int),
+                  return_counts=True
+              )
+
+              return [
+                  [
+                      int(value),
+                      int(count)
+                  ]
+                  for value, count
+                  in zip(unique, counts)
+              ]
+
+
+          def safe_mean(series):
+              series = pd.to_numeric(
+                  series,
+                  errors="coerce"
+              ).dropna()
+
+              if len(series) == 0:
+                  return 0.0
+
+              return float(series.mean())
+
+
+          # ========================================================
+          # LOAD SCHEDULE
+          # ========================================================
+
+          print("")
+          print("Loading schedule...")
+
+          schedule = to_pandas(
+              nfl.load_schedules(
+                  list(
+                      range(
+                          2022,
+                          SEASON + 1
+                      )
+                  )
+              )
           )
 
-          schedule["week"] = pd.to_numeric(
-              schedule["week"],
-              errors="coerce"
+          print(
+              "Schedule rows:",
+              len(schedule)
           )
 
-          # ==================================================
-          # TARGET WEEK
-          # ==================================================
+          season_col = first_existing(
+              schedule.columns,
+              ["season"]
+          )
 
-          week_games = schedule[
-              (schedule["season"] == SEASON) &
-              (schedule["week"] == WEEK)
-          ].copy()
+          week_col = first_existing(
+              schedule.columns,
+              ["week"]
+          )
 
-          if "game_type" in week_games.columns:
+          home_col = first_existing(
+              schedule.columns,
+              ["home_team"]
+          )
 
-              regular = week_games[
-                  week_games["game_type"]
+          away_col = first_existing(
+              schedule.columns,
+              ["away_team"]
+          )
+
+          game_type_col = first_existing(
+              schedule.columns,
+              ["game_type"]
+          )
+
+          if not all([
+              season_col,
+              week_col,
+              home_col,
+              away_col
+          ]):
+              raise RuntimeError(
+                  "Required schedule columns missing."
+              )
+
+          # Prefer regular-season games where game_type exists.
+          regular_schedule = schedule.copy()
+
+          if game_type_col:
+              possible_regular = regular_schedule[
+                  regular_schedule[
+                      game_type_col
+                  ]
                   .astype(str)
                   .str.upper()
                   .isin([
                       "REG",
                       "REGULAR",
-                      "REGULAR SEASON"
+                      "R"
                   ])
-              ].copy()
-
-              if not regular.empty:
-                  week_games = regular
-
-          week_games = week_games.dropna(
-              subset=[
-                  "away_team",
-                  "home_team"
               ]
-          ).copy()
+
+              if len(possible_regular) > 0:
+                  regular_schedule = possible_regular
+
+          week_games = regular_schedule[
+              (
+                  pd.to_numeric(
+                      regular_schedule[
+                          season_col
+                      ],
+                      errors="coerce"
+                  )
+                  == SEASON
+              )
+              &
+              (
+                  pd.to_numeric(
+                      regular_schedule[
+                          week_col
+                      ],
+                      errors="coerce"
+                  )
+                  == WEEK
+              )
+          ].copy()
 
           if week_games.empty:
               raise RuntimeError(
-                  f"No games found for {SEASON} Week {WEEK}"
+                  f"No games found for {SEASON} Week {WEEK}."
               )
 
           games = []
           team_to_game = {}
-          team_to_opponent = {}
 
           for _, row in week_games.iterrows():
+              away = normalize_team(
+                  row[away_col]
+              )
 
-              away = str(
-                  row["away_team"]
-              ).strip()
+              home = normalize_team(
+                  row[home_col]
+              )
 
-              home = str(
-                  row["home_team"]
-              ).strip()
+              if not away or not home:
+                  continue
 
               game_name = f"{away} @ {home}"
 
-              game = {
+              games.append({
                   "game": game_name,
                   "away_team": away,
                   "home_team": home
+              })
+
+              team_to_game[away] = {
+                  "game": game_name,
+                  "opponent": home
               }
 
-              if (
-                  "gameday" in week_games.columns
-                  and pd.notna(row.get("gameday"))
-              ):
-                  game["gameday"] = str(
-                      row.get("gameday")
-                  )
+              team_to_game[home] = {
+                  "game": game_name,
+                  "opponent": away
+              }
 
-              if (
-                  "gametime" in week_games.columns
-                  and pd.notna(row.get("gametime"))
-              ):
-                  game["gametime"] = str(
-                      row.get("gametime")
-                  )
+          print(
+              "Slate games:",
+              len(games)
+          )
 
-              if (
-                  "weekday" in week_games.columns
-                  and pd.notna(row.get("weekday"))
-              ):
-                  game["weekday"] = str(
-                      row.get("weekday")
-                  )
+          for game in games:
+              print(" -", game["game"])
 
-              games.append(game)
-
-              team_to_game[away] = game_name
-              team_to_game[home] = game_name
-
-              team_to_opponent[away] = home
-              team_to_opponent[home] = away
-
-          slate_teams = sorted(
+          slate_teams = set(
               team_to_game.keys()
           )
 
-          print("TARGET GAMES:", len(games))
+          # ========================================================
+          # HISTORICAL OPPONENT LOOKUP
+          # ========================================================
 
-          for game in games:
-              print("GAME:", game["game"])
+          schedule_lookup = {}
 
-          # ==================================================
-          # LOAD PLAYER STATS
-          # ==================================================
+          for _, row in regular_schedule.iterrows():
+              try:
+                  season = int(
+                      row[season_col]
+                  )
 
-          df = nfl.load_player_stats(
-              [2022, 2023, 2024, 2025, 2026]
-          )
+                  week = int(
+                      row[week_col]
+                  )
 
-          if hasattr(df, "to_pandas"):
-              df = df.to_pandas()
+              except Exception:
+                  continue
 
-          df = pd.DataFrame(df)
-
-          if (
-              "recent_team" not in df.columns
-              and "team" in df.columns
-          ):
-              df["recent_team"] = df["team"]
-
-          targets = [
-              "passing_yards",
-              "rushing_yards",
-              "receiving_yards",
-              "receptions"
-          ]
-
-          required = [
-              "player_id",
-              "player_display_name",
-              "position",
-              "season",
-              "week",
-              "recent_team"
-          ] + targets
-
-          missing = [
-              c for c in required
-              if c not in df.columns
-          ]
-
-          if missing:
-              raise RuntimeError(
-                  f"Missing player columns: {missing}"
+              home = normalize_team(
+                  row[home_col]
               )
 
-          for col in targets:
+              away = normalize_team(
+                  row[away_col]
+              )
 
-              df[col] = pd.to_numeric(
-                  df[col],
-                  errors="coerce"
-              ).fillna(0.0)
+              if not home or not away:
+                  continue
 
-          df["season"] = pd.to_numeric(
-              df["season"],
-              errors="coerce"
+              schedule_lookup[
+                  (
+                      season,
+                      week,
+                      home
+                  )
+              ] = away
+
+              schedule_lookup[
+                  (
+                      season,
+                      week,
+                      away
+                  )
+              ] = home
+
+          # ========================================================
+          # LOAD PLAYER STATS
+          # ========================================================
+
+          print("")
+          print("Loading player stats...")
+
+          stats = to_pandas(
+              nfl.load_player_stats(
+                  list(
+                      range(
+                          2022,
+                          SEASON + 1
+                      )
+                  )
+              )
           )
 
-          df["week"] = pd.to_numeric(
-              df["week"],
-              errors="coerce"
+          print(
+              "Player rows:",
+              len(stats)
           )
 
-          df = df.dropna(
-              subset=[
+          print(
+              "Player columns:",
+              len(stats.columns)
+          )
+
+          player_id_col = first_existing(
+              stats.columns,
+              [
                   "player_id",
-                  "season",
-                  "week",
-                  "recent_team"
+                  "gsis_id"
               ]
-          ).copy()
+          )
 
-          df["recent_team"] = (
-              df["recent_team"]
+          player_name_col = first_existing(
+              stats.columns,
+              [
+                  "player_display_name",
+                  "player_name",
+                  "name"
+              ]
+          )
+
+          team_col = first_existing(
+              stats.columns,
+              [
+                  "recent_team",
+                  "team"
+              ]
+          )
+
+          position_col = first_existing(
+              stats.columns,
+              [
+                  "position",
+                  "position_group"
+              ]
+          )
+
+          if not all([
+              player_id_col,
+              player_name_col,
+              team_col,
+              position_col,
+              "season",
+              "week"
+          ]):
+              raise RuntimeError(
+                  "Required player-stat columns missing."
+              )
+
+          stats = stats.copy()
+
+          stats["team_jpro"] = (
+              stats[team_col]
               .astype(str)
+              .str.upper()
               .str.strip()
           )
 
-          df = df.sort_values(
+          stats["position_jpro"] = (
+              stats[position_col]
+              .astype(str)
+              .str.upper()
+              .str.strip()
+          )
+
+          stats["player_id_jpro"] = (
+              stats[player_id_col]
+              .astype(str)
+          )
+
+          stats["player_name_jpro"] = (
+              stats[player_name_col]
+              .astype(str)
+          )
+
+          stats["season"] = pd.to_numeric(
+              stats["season"],
+              errors="coerce"
+          )
+
+          stats["week"] = pd.to_numeric(
+              stats["week"],
+              errors="coerce"
+          )
+
+          stats = stats[
+              stats["season"].notna()
+              &
+              stats["week"].notna()
+          ].copy()
+
+          stats["season"] = (
+              stats["season"]
+              .astype(int)
+          )
+
+          stats["week"] = (
+              stats["week"]
+              .astype(int)
+          )
+
+          # ========================================================
+          # TARGETS
+          # ========================================================
+
+          target_specs = {
+              "passing_yards": {
+                  "positions": ["QB"],
+                  "min_projection": 25
+              },
+
+              "rushing_yards": {
+                  "positions": [
+                      "QB",
+                      "RB",
+                      "WR"
+                  ],
+                  "min_projection": 2
+              },
+
+              "receiving_yards": {
+                  "positions": [
+                      "RB",
+                      "WR",
+                      "TE"
+                  ],
+                  "min_projection": 2
+              },
+
+              "receptions": {
+                  "positions": [
+                      "RB",
+                      "WR",
+                      "TE"
+                  ],
+                  "min_projection": 0.25
+              }
+          }
+
+          available_targets = {}
+
+          for target, spec in target_specs.items():
+              if target in stats.columns:
+                  available_targets[
+                      target
+                  ] = spec
+
+          if not available_targets:
+              raise RuntimeError(
+                  "No supported target columns found."
+              )
+
+          # ========================================================
+          # SORT / CREATE LAG FEATURES
+          # ========================================================
+
+          stats = stats.sort_values(
               [
-                  "player_id",
+                  "player_id_jpro",
                   "season",
                   "week"
               ]
@@ -282,294 +725,312 @@ jobs:
               drop=True
           )
 
-          print("REAL NFL ROWS:", len(df))
+          feature_columns = []
 
-          # ==================================================
-          # ATTACH EACH HISTORICAL PLAYER ROW TO OPPONENT
-          # ==================================================
-
-          schedule_lookup = {}
-
-          for _, row in schedule.iterrows():
-
-              if (
-                  pd.isna(row.get("season"))
-                  or pd.isna(row.get("week"))
-                  or pd.isna(row.get("away_team"))
-                  or pd.isna(row.get("home_team"))
-              ):
-                  continue
-
-              season = int(row["season"])
-              week = int(row["week"])
-
-              away = str(
-                  row["away_team"]
-              ).strip()
-
-              home = str(
-                  row["home_team"]
-              ).strip()
-
-              schedule_lookup[
-                  (season, week, away)
-              ] = home
-
-              schedule_lookup[
-                  (season, week, home)
-              ] = away
-
-          def lookup_opponent(row):
-
-              try:
-
-                  key = (
-                      int(row["season"]),
-                      int(row["week"]),
-                      str(row["recent_team"]).strip()
-                  )
-
-                  return schedule_lookup.get(
-                      key
-                  )
-
-              except:
-                  return None
-
-          df["opponent"] = df.apply(
-              lookup_opponent,
-              axis=1
-          )
-
-          matched_opponents = int(
-              df["opponent"].notna().sum()
-          )
-
-          print(
-              "PLAYER ROWS WITH OPPONENT:",
-              matched_opponents
-          )
-
-          # ==================================================
-          # PREGAME SNAPSHOT
-          # ==================================================
-
-          pregame_2026 = df[
-              (df["season"] == SEASON) &
-              (df["week"] < WEEK)
-          ].copy()
-
-          # ==================================================
-          # LEAKAGE-SAFE MODEL FEATURES
-          # ==================================================
-
-          group = df.groupby(
-              "player_id",
-              group_keys=False
-          )
-
-          for stat in targets:
-
-              df[f"{stat}_lag1"] = (
-                  group[stat].shift(1)
+          for target in available_targets:
+              numeric_target = pd.to_numeric(
+                  stats[target],
+                  errors="coerce"
               )
 
-              df[f"{stat}_avg3"] = (
-                  group[stat].transform(
-                      lambda x:
-                      x.shift(1)
-                      .rolling(
-                          3,
-                          min_periods=1
-                      )
-                      .mean()
+              stats[target] = (
+                  numeric_target
+                  .fillna(0.0)
+              )
+
+              grouped = stats.groupby(
+                  "player_id_jpro"
+              )[target]
+
+              lag1 = (
+                  grouped.shift(1)
+              )
+
+              avg3 = (
+                  grouped
+                  .shift(1)
+                  .rolling(
+                      3,
+                      min_periods=1
+                  )
+                  .mean()
+                  .reset_index(
+                      level=0,
+                      drop=True
                   )
               )
 
-              df[f"{stat}_avg5"] = (
-                  group[stat].transform(
-                      lambda x:
-                      x.shift(1)
-                      .rolling(
-                          5,
-                          min_periods=1
-                      )
-                      .mean()
+              avg5 = (
+                  grouped
+                  .shift(1)
+                  .rolling(
+                      5,
+                      min_periods=1
+                  )
+                  .mean()
+                  .reset_index(
+                      level=0,
+                      drop=True
                   )
               )
 
-              df[f"{stat}_std5"] = (
-                  group[stat].transform(
-                      lambda x:
-                      x.shift(1)
-                      .rolling(
-                          5,
-                          min_periods=2
-                      )
-                      .std()
+              std5 = (
+                  grouped
+                  .shift(1)
+                  .rolling(
+                      5,
+                      min_periods=2
+                  )
+                  .std()
+                  .reset_index(
+                      level=0,
+                      drop=True
                   )
               )
 
-          df["games_before"] = (
-              group.cumcount()
-          )
+              lag_col = f"{target}_lag1"
+              avg3_col = f"{target}_avg3"
+              avg5_col = f"{target}_avg5"
+              std5_col = f"{target}_std5"
 
-          model_df = df[
-              df["games_before"] >= 3
-          ].copy()
+              stats[lag_col] = lag1
+              stats[avg3_col] = avg3
+              stats[avg5_col] = avg5
+              stats[std5_col] = std5
 
-          # ==================================================
-          # MODEL FEATURES
-          # ==================================================
-
-          feature_cols = [
-              "season",
-              "week",
-              "games_before",
-
-              "passing_yards_lag1",
-              "passing_yards_avg3",
-              "passing_yards_avg5",
-              "passing_yards_std5",
-
-              "rushing_yards_lag1",
-              "rushing_yards_avg3",
-              "rushing_yards_avg5",
-              "rushing_yards_std5",
-
-              "receiving_yards_lag1",
-              "receiving_yards_avg3",
-              "receiving_yards_avg5",
-              "receiving_yards_std5",
-
-              "receptions_lag1",
-              "receptions_avg3",
-              "receptions_avg5",
-              "receptions_std5",
-
-              "position",
-              "recent_team"
-          ]
-
-          numeric_features = [
-              x for x in feature_cols
-              if x not in [
-                  "position",
-                  "recent_team"
-              ]
-          ]
-
-          categorical_features = [
-              "position",
-              "recent_team"
-          ]
-
-          specs = {
-              "passing_yards": ["QB"],
-
-              "rushing_yards": [
-                  "QB",
-                  "RB",
-                  "WR"
-              ],
-
-              "receiving_yards": [
-                  "WR",
-                  "TE",
-                  "RB"
-              ],
-
-              "receptions": [
-                  "WR",
-                  "TE",
-                  "RB"
-              ]
-          }
-
-          # ==================================================
-          # CURRENT PLAYER STATE
-          # ==================================================
-
-          current_pool = model_df[
-              (model_df["season"] == SEASON) &
-              (model_df["week"] < WEEK)
-          ].copy()
-
-          if current_pool.empty:
-              raise RuntimeError(
-                  "No pregame player state found."
-              )
-
-          current = (
-              current_pool
-              .sort_values([
-                  "player_id",
-                  "week"
+              feature_columns.extend([
+                  lag_col,
+                  avg3_col,
+                  avg5_col,
+                  std5_col
               ])
-              .groupby("player_id")
+
+          # Generic time/context features.
+          stats["week_feature"] = (
+              stats["week"]
+              .astype(float)
+          )
+
+          stats["season_feature"] = (
+              stats["season"]
+              .astype(float)
+          )
+
+          feature_columns.extend([
+              "week_feature",
+              "season_feature"
+          ])
+
+          # ========================================================
+          # CURRENT PRE-WEEK STATE
+          # ========================================================
+
+          pregame_2026 = stats[
+              (
+                  stats["season"] == SEASON
+              )
+              &
+              (
+                  stats["week"] < WEEK
+              )
+          ].copy()
+
+          if pregame_2026.empty:
+              raise RuntimeError(
+                  "No current-season pregame rows available."
+              )
+
+          latest_current = (
+              pregame_2026
+              .sort_values(
+                  [
+                      "player_id_jpro",
+                      "week"
+                  ]
+              )
+              .groupby(
+                  "player_id_jpro",
+                  as_index=False
+              )
               .tail(1)
               .copy()
           )
 
-          current = current[
-              current["recent_team"].isin(
+          latest_current = latest_current[
+              latest_current[
+                  "team_jpro"
+              ].isin(
                   slate_teams
               )
           ].copy()
 
-          current["game"] = (
-              current["recent_team"]
-              .map(team_to_game)
-          )
-
-          current["opponent"] = (
-              current["recent_team"]
-              .map(team_to_opponent)
-          )
-
-          current = current.dropna(
-              subset=[
-                  "game",
-                  "opponent"
-              ]
-          ).copy()
-
+          print("")
           print(
-              "CURRENT SLATE PLAYERS:",
-              len(current)
+              "Current slate player rows:",
+              len(latest_current)
           )
 
-          # ==================================================
-          # HELPERS
-          # ==================================================
+          # ========================================================
+          # ROLE INTELLIGENCE V1
+          # Kept unchanged for this audit run.
+          # 3D-2 will replace this after we inspect opportunity data.
+          # ========================================================
 
-          def safe_float(value):
+          def player_stat_summary(
+              player_rows,
+              stat_name
+          ):
+              if stat_name not in player_rows.columns:
+                  return {
+                      "season_avg": 0.0,
+                      "recent_avg": 0.0,
+                      "last_game": 0.0,
+                      "recent_std": 0.0,
+                      "trend": 0.0
+                  }
 
-              try:
-
-                  value = float(value)
-
-                  if np.isfinite(value):
-                      return value
-
-              except:
-                  pass
-
-              return 0.0
-
-          def round2(value):
-
-              return round(
-                  safe_float(value),
-                  2
+              ordered = (
+                  player_rows
+                  .sort_values("week")
               )
 
-          # ==================================================
-          # ROLE INTELLIGENCE
-          # ==================================================
+              values = pd.to_numeric(
+                  ordered[stat_name],
+                  errors="coerce"
+              ).fillna(0.0)
+
+              recent = values.tail(3)
+
+              season_avg = (
+                  float(values.mean())
+                  if len(values)
+                  else 0.0
+              )
+
+              recent_avg = (
+                  float(recent.mean())
+                  if len(recent)
+                  else 0.0
+              )
+
+              last_game = (
+                  float(values.iloc[-1])
+                  if len(values)
+                  else 0.0
+              )
+
+              recent_std = (
+                  float(recent.std(ddof=0))
+                  if len(recent) > 1
+                  else 0.0
+              )
+
+              trend = (
+                  recent_avg -
+                  season_avg
+              )
+
+              return {
+                  "season_avg":
+                      season_avg,
+
+                  "recent_avg":
+                      recent_avg,
+
+                  "last_game":
+                      last_game,
+
+                  "recent_std":
+                      recent_std,
+
+                  "trend":
+                      trend
+              }
+
+
+          team_totals = {}
+
+          for (
+              team,
+              week
+          ), group in pregame_2026.groupby(
+              [
+                  "team_jpro",
+                  "week"
+              ]
+          ):
+              team_totals[
+                  (
+                      team,
+                      int(week)
+                  )
+              ] = {
+                  target:
+                      float(
+                          pd.to_numeric(
+                              group[target],
+                              errors="coerce"
+                          )
+                          .fillna(0)
+                          .sum()
+                      )
+                  for target
+                  in available_targets
+              }
+
+
+          def player_share(
+              player_rows,
+              stat_name
+          ):
+              shares = []
+
+              for _, row in player_rows.iterrows():
+                  team = row[
+                      "team_jpro"
+                  ]
+
+                  week = int(
+                      row["week"]
+                  )
+
+                  team_total = (
+                      team_totals
+                      .get(
+                          (
+                              team,
+                              week
+                          ),
+                          {}
+                      )
+                      .get(
+                          stat_name,
+                          0.0
+                      )
+                  )
+
+                  player_value = clean_number(
+                      row.get(
+                          stat_name,
+                          0.0
+                      )
+                  )
+
+                  if team_total > 0:
+                      shares.append(
+                          player_value /
+                          team_total
+                      )
+
+              if not shares:
+                  return 0.0
+
+              return float(
+                  np.mean(shares)
+              )
+
 
           def role_label(score):
-
               if score >= 80:
                   return "FEATURED"
 
@@ -584,368 +1045,337 @@ jobs:
 
               return "LIMITED"
 
-          def player_role(
-              player_id,
-              team,
-              position
-          ):
 
-              history = pregame_2026[
-                  pregame_2026["player_id"]
-                  == player_id
-              ].sort_values(
-                  "week"
-              ).copy()
+          def build_role(player_id):
+              rows = pregame_2026[
+                  pregame_2026[
+                      "player_id_jpro"
+                  ] == player_id
+              ].copy()
 
-              if history.empty:
-
+              if rows.empty:
                   return {
-                      "role_score": 0,
+                      "role_score": 0.0,
                       "role_label": "UNKNOWN",
                       "games_sample": 0
                   }
 
-              recent = history.tail(3)
-
-              role = {
-                  "games_sample":
-                      int(len(history))
-              }
-
-              for stat in targets:
-
-                  values = history[
-                      stat
-                  ].to_numpy(
-                      dtype=float
-                  )
-
-                  recent_values = recent[
-                      stat
-                  ].to_numpy(
-                      dtype=float
-                  )
-
-                  season_avg = (
-                      float(np.mean(values))
-                      if len(values)
-                      else 0.0
-                  )
-
-                  recent_avg = (
-                      float(np.mean(recent_values))
-                      if len(recent_values)
-                      else 0.0
-                  )
-
-                  last_game = (
-                      float(values[-1])
-                      if len(values)
-                      else 0.0
-                  )
-
-                  consistency = (
-                      float(np.std(recent_values))
-                      if len(recent_values) > 1
-                      else 0.0
-                  )
-
-                  trend = (
-                      recent_avg -
-                      season_avg
-                  )
-
-                  role[
-                      f"{stat}_season_avg"
-                  ] = round2(
-                      season_avg
-                  )
-
-                  role[
-                      f"{stat}_recent_avg"
-                  ] = round2(
-                      recent_avg
-                  )
-
-                  role[
-                      f"{stat}_last_game"
-                  ] = round2(
-                      last_game
-                  )
-
-                  role[
-                      f"{stat}_recent_std"
-                  ] = round2(
-                      consistency
-                  )
-
-                  role[
-                      f"{stat}_trend"
-                  ] = round2(
-                      trend
-                  )
-
-              team_history = pregame_2026[
-                  pregame_2026["recent_team"]
-                  == team
-              ].copy()
-
-              team_weeks = sorted(
-                  history["week"]
-                  .dropna()
-                  .unique()
-                  .tolist()
+              latest = (
+                  rows
+                  .sort_values("week")
+                  .iloc[-1]
               )
 
-              team_history = team_history[
-                  team_history["week"].isin(
-                      team_weeks
-                  )
-              ].copy()
+              position = str(
+                  latest[
+                      "position_jpro"
+                  ]
+              ).upper()
 
-              for stat in targets:
-
-                  player_total = safe_float(
-                      history[stat].sum()
+              pass_summary = (
+                  player_stat_summary(
+                      rows,
+                      "passing_yards"
                   )
+              )
 
-                  team_total = safe_float(
-                      team_history[stat].sum()
+              rush_summary = (
+                  player_stat_summary(
+                      rows,
+                      "rushing_yards"
                   )
+              )
 
-                  share = (
-                      player_total / team_total
-                      if team_total > 0
-                      else 0.0
+              rec_summary = (
+                  player_stat_summary(
+                      rows,
+                      "receiving_yards"
                   )
+              )
 
-                  role[
-                      f"{stat}_team_share"
-                  ] = round2(
-                      share
+              catch_summary = (
+                  player_stat_summary(
+                      rows,
+                      "receptions"
                   )
+              )
+
+              pass_share = (
+                  player_share(
+                      rows,
+                      "passing_yards"
+                  )
+              )
+
+              rush_share = (
+                  player_share(
+                      rows,
+                      "rushing_yards"
+                  )
+              )
+
+              rec_share = (
+                  player_share(
+                      rows,
+                      "receiving_yards"
+                  )
+              )
+
+              score = 0.0
 
               if position == "QB":
-
                   score = (
                       min(
-                          role["passing_yards_recent_avg"] / 300,
-                          1
-                      ) * 45
+                          pass_summary[
+                              "recent_avg"
+                          ] / 300.0,
+                          1.0
+                      )
+                      * 55.0
                       +
                       min(
-                          role["passing_yards_team_share"],
-                          1
-                      ) * 40
+                          pass_share,
+                          1.0
+                      )
+                      * 30.0
                       +
                       min(
-                          role["rushing_yards_recent_avg"] / 50,
-                          1
-                      ) * 15
+                          rush_summary[
+                              "recent_avg"
+                          ] / 50.0,
+                          1.0
+                      )
+                      * 15.0
                   )
 
               elif position == "RB":
-
                   score = (
                       min(
-                          role["rushing_yards_recent_avg"] / 100,
-                          1
-                      ) * 35
+                          rush_summary[
+                              "recent_avg"
+                          ] / 90.0,
+                          1.0
+                      )
+                      * 45.0
                       +
                       min(
-                          role["rushing_yards_team_share"] / .70,
-                          1
-                      ) * 30
+                          rush_share / 0.65,
+                          1.0
+                      )
+                      * 30.0
                       +
                       min(
-                          role["receiving_yards_recent_avg"] / 50,
-                          1
-                      ) * 20
+                          rec_summary[
+                              "recent_avg"
+                          ] / 45.0,
+                          1.0
+                      )
+                      * 15.0
                       +
                       min(
-                          role["receptions_recent_avg"] / 5,
-                          1
-                      ) * 15
+                          catch_summary[
+                              "recent_avg"
+                          ] / 5.0,
+                          1.0
+                      )
+                      * 10.0
                   )
 
-              elif position in ["WR", "TE"]:
-
+              elif position in [
+                  "WR",
+                  "TE"
+              ]:
                   score = (
                       min(
-                          role["receiving_yards_recent_avg"] / 100,
-                          1
-                      ) * 40
+                          rec_summary[
+                              "recent_avg"
+                          ] / 90.0,
+                          1.0
+                      )
+                      * 45.0
                       +
                       min(
-                          role["receptions_recent_avg"] / 8,
-                          1
-                      ) * 30
+                          catch_summary[
+                              "recent_avg"
+                          ] / 7.0,
+                          1.0
+                      )
+                      * 25.0
                       +
                       min(
-                          role["receiving_yards_team_share"] / .40,
-                          1
-                      ) * 30
+                          rec_share / 0.35,
+                          1.0
+                      )
+                      * 30.0
                   )
 
-              else:
-                  score = 0.0
-
-              score = max(
-                  0.0,
-                  min(
-                      100.0,
-                      score
+              score = float(
+                  np.clip(
+                      score,
+                      0,
+                      100
                   )
               )
 
-              role["role_score"] = round(
-                  score,
-                  1
+              return {
+                  "role_score":
+                      round(
+                          score,
+                          2
+                      ),
+
+                  "role_label":
+                      role_label(
+                          score
+                      ),
+
+                  "games_sample":
+                      int(
+                          len(rows)
+                      ),
+
+                  "passing_yards_season_avg":
+                      round(
+                          pass_summary[
+                              "season_avg"
+                          ],
+                          2
+                      ),
+
+                  "passing_yards_recent_avg":
+                      round(
+                          pass_summary[
+                              "recent_avg"
+                          ],
+                          2
+                      ),
+
+                  "rushing_yards_season_avg":
+                      round(
+                          rush_summary[
+                              "season_avg"
+                          ],
+                          2
+                      ),
+
+                  "rushing_yards_recent_avg":
+                      round(
+                          rush_summary[
+                              "recent_avg"
+                          ],
+                          2
+                      ),
+
+                  "receiving_yards_season_avg":
+                      round(
+                          rec_summary[
+                              "season_avg"
+                          ],
+                          2
+                      ),
+
+                  "receiving_yards_recent_avg":
+                      round(
+                          rec_summary[
+                              "recent_avg"
+                          ],
+                          2
+                      ),
+
+                  "receptions_season_avg":
+                      round(
+                          catch_summary[
+                              "season_avg"
+                          ],
+                          2
+                      ),
+
+                  "receptions_recent_avg":
+                      round(
+                          catch_summary[
+                              "recent_avg"
+                          ],
+                          2
+                      ),
+
+                  "passing_yards_share":
+                      round(
+                          pass_share,
+                          4
+                      ),
+
+                  "rushing_yards_share":
+                      round(
+                          rush_share,
+                          4
+                      ),
+
+                  "receiving_yards_share":
+                      round(
+                          rec_share,
+                          4
+                      )
+              }
+
+          # ========================================================
+          # OPPONENT ATTACHMENT
+          # ========================================================
+
+          def lookup_opponent(row):
+              key = (
+                  int(row["season"]),
+                  int(row["week"]),
+                  normalize_team(
+                      row[
+                          "team_jpro"
+                      ]
+                  )
               )
 
-              role["role_label"] = role_label(
-                  score
+              return schedule_lookup.get(
+                  key,
+                  ""
               )
 
-              return role
 
-          role_cache = {}
-
-          for _, row in current.iterrows():
-
-              player_id = str(
-                  row["player_id"]
-              )
-
-              role_cache[player_id] = player_role(
-                  player_id,
-                  str(row["recent_team"]),
-                  str(row["position"])
-              )
-
-          print(
-              "ROLE PROFILES:",
-              len(role_cache)
+          stats[
+              "opponent_jpro"
+          ] = stats.apply(
+              lookup_opponent,
+              axis=1
           )
 
-          # ==================================================
-          # OPPONENT DEFENSIVE PRODUCTION
-          # ==================================================
-          #
-          # Measures offensive production accumulated
-          # AGAINST each defense before the target game.
-          #
-          # 2026 data receives more weight, while prior
-          # seasons provide a stabilizing baseline.
-          # ==================================================
-
-          opponent_rows = df[
-              df["opponent"].notna()
-          ].copy()
-
-          opponent_rows = opponent_rows[
+          # Pregame rows only.
+          opponent_rows = stats[
               (
-                  opponent_rows["season"] < SEASON
+                  stats["season"] < SEASON
               )
               |
               (
                   (
-                      opponent_rows["season"] == SEASON
+                      stats["season"] == SEASON
                   )
                   &
                   (
-                      opponent_rows["week"] < WEEK
+                      stats["week"] < WEEK
                   )
               )
           ].copy()
 
-          # Only positions relevant to player props.
           opponent_rows = opponent_rows[
-              opponent_rows["position"].isin(
-                  ["QB", "RB", "WR", "TE"]
-              )
+              opponent_rows[
+                  "opponent_jpro"
+              ] != ""
           ].copy()
 
-          def defensive_game_totals(
-              rows,
-              defense,
-              stat,
-              positions,
-              season_filter=None
-          ):
-
-              sample = rows[
-                  (rows["opponent"] == defense) &
-                  (rows["position"].isin(positions))
-              ].copy()
-
-              if season_filter is not None:
-
-                  sample = sample[
-                      sample["season"] == season_filter
-                  ].copy()
-
-              if sample.empty:
-                  return np.array([], dtype=float)
-
-              game_totals = (
-                  sample.groupby(
-                      [
-                          "season",
-                          "week",
-                          "recent_team"
-                      ]
-                  )[stat]
-                  .sum()
-                  .to_numpy(
-                      dtype=float
-                  )
-              )
-
-              return game_totals
-
-          def league_game_average(
-              rows,
-              stat,
-              positions,
-              season_filter=None
-          ):
-
-              sample = rows[
-                  rows["position"].isin(
-                      positions
-                  )
-              ].copy()
-
-              if season_filter is not None:
-
-                  sample = sample[
-                      sample["season"] == season_filter
-                  ].copy()
-
-              if sample.empty:
-                  return 0.0
-
-              totals = (
-                  sample.groupby(
-                      [
-                          "season",
-                          "week",
-                          "recent_team"
-                      ]
-                  )[stat]
-                  .sum()
-              )
-
-              if totals.empty:
-                  return 0.0
-
-              return float(
-                  totals.mean()
-              )
+          # ========================================================
+          # DEFENSIVE MATCHUP INTELLIGENCE
+          # ========================================================
 
           matchup_specs = {
-              "passing_yards": ["QB"],
+              "passing_yards": [
+                  "QB"
+              ],
 
               "rushing_yards": [
                   "QB",
@@ -966,394 +1396,473 @@ jobs:
               ]
           }
 
-          matchup_cache = {}
 
-          for defense in slate_teams:
-
-              matchup_cache[defense] = {}
-
-              for stat, positions in matchup_specs.items():
-
-                  current_games = defensive_game_totals(
-                      opponent_rows,
-                      defense,
-                      stat,
-                      positions,
-                      SEASON
+          def defensive_game_totals(
+              frame,
+              stat_name,
+              positions
+          ):
+              if stat_name not in frame.columns:
+                  return pd.DataFrame(
+                      columns=[
+                          "season",
+                          "week",
+                          "opponent_jpro",
+                          "allowed"
+                      ]
                   )
 
-                  historical_games = defensive_game_totals(
-                      opponent_rows,
-                      defense,
-                      stat,
-                      positions,
-                      None
-                  )
-
-                  league_current = league_game_average(
-                      opponent_rows,
-                      stat,
-                      positions,
-                      SEASON
-                  )
-
-                  league_all = league_game_average(
-                      opponent_rows,
-                      stat,
-                      positions,
-                      None
-                  )
-
-                  current_avg = (
-                      float(
-                          np.mean(current_games)
-                      )
-                      if len(current_games)
-                      else 0.0
-                  )
-
-                  historical_avg = (
-                      float(
-                          np.mean(historical_games)
-                      )
-                      if len(historical_games)
-                      else 0.0
-                  )
-
-                  # ------------------------------------------
-                  # SHRINK EARLY-SEASON DATA
-                  # ------------------------------------------
-                  #
-                  # Week 3 only gives us two current-season
-                  # games. Use current season as the primary
-                  # signal, but stabilize it with historical
-                  # defensive production.
-                  # ------------------------------------------
-
-                  current_n = len(
-                      current_games
-                  )
-
-                  current_weight = min(
-                      current_n / 6.0,
-                      .65
-                  )
-
-                  if current_n == 0:
-                      current_weight = 0.0
-
-                  historical_weight = (
-                      1.0 -
-                      current_weight
-                  )
-
-                  if historical_avg <= 0:
-
-                      historical_avg = (
-                          league_all
-                      )
-
-                  if current_avg <= 0:
-
-                      current_avg = (
-                          historical_avg
-                      )
-
-                  blended_allowed = (
-                      current_avg *
-                      current_weight
-                      +
-                      historical_avg *
-                      historical_weight
-                  )
-
-                  league_reference = (
-                      league_current *
-                      current_weight
-                      +
-                      league_all *
-                      historical_weight
-                  )
-
-                  if league_reference <= 0:
-                      league_reference = 1.0
-
-                  ratio = (
-                      blended_allowed /
-                      league_reference
-                  )
-
-                  # Ratio > 1 means this defense has allowed
-                  # more production than league baseline.
-                  #
-                  # Convert it into a centered 0-100 matchup
-                  # score where ~50 is neutral.
-                  score = (
-                      50.0 +
-                      (
-                          ratio - 1.0
-                      ) * 100.0
-                  )
-
-                  score = max(
-                      0.0,
-                      min(
-                          100.0,
-                          score
-                      )
-                  )
-
-                  if score >= 65:
-                      label = "FAVORABLE"
-
-                  elif score <= 35:
-                      label = "TOUGH"
-
-                  else:
-                      label = "NEUTRAL"
-
-                  matchup_cache[
-                      defense
-                  ][stat] = {
-
-                      "matchup_score":
-                          round(
-                              score,
-                              1
-                          ),
-
-                      "matchup_label":
-                          label,
-
-                      "allowed_per_game":
-                          round2(
-                              blended_allowed
-                          ),
-
-                      "league_per_game":
-                          round2(
-                              league_reference
-                          ),
-
-                      "allowed_vs_league_ratio":
-                          round(
-                              ratio,
-                              3
-                          ),
-
-                      "current_season_allowed":
-                          round2(
-                              current_avg
-                          ),
-
-                      "historical_allowed":
-                          round2(
-                              historical_avg
-                          ),
-
-                      "current_season_games":
-                          int(
-                              current_n
-                          ),
-
-                      "method":
-                          "SHRUNK_DEFENSIVE_PRODUCTION"
-                  }
-
-          print(
-              "DEFENSE PROFILES:",
-              len(matchup_cache)
-          )
-
-          # ==================================================
-          # MODEL FACTORY
-          # ==================================================
-
-          def make_model():
-
-              preprocessor = ColumnTransformer(
-                  transformers=[
-                      (
-                          "num",
-                          Pipeline(
-                              steps=[
-                                  (
-                                      "imputer",
-                                      SimpleImputer(
-                                          strategy="median"
-                                      )
-                                  ),
-                                  (
-                                      "scale",
-                                      StandardScaler()
-                                  )
-                              ]
-                          ),
-                          numeric_features
-                      ),
-                      (
-                          "cat",
-                          Pipeline(
-                              steps=[
-                                  (
-                                      "imputer",
-                                      SimpleImputer(
-                                          strategy="most_frequent"
-                                      )
-                                  ),
-                                  (
-                                      "onehot",
-                                      OneHotEncoder(
-                                          handle_unknown="ignore"
-                                      )
-                                  )
-                              ]
-                          ),
-                          categorical_features
-                      )
-                  ]
-              )
-
-              return Pipeline(
-                  steps=[
-                      (
-                          "prep",
-                          preprocessor
-                      ),
-                      (
-                          "model",
-                          Ridge(
-                              alpha=10.0
-                          )
-                      )
-                  ]
-              )
-
-          # ==================================================
-          # COMPRESS 20K DISTRIBUTION
-          # ==================================================
-
-          def compress_distribution(sims):
-
-              values, counts = np.unique(
-                  sims,
-                  return_counts=True
-              )
-
-              histogram = [
-                  [
-                      int(value),
-                      int(count)
-                  ]
-                  for value, count
-                  in zip(
-                      values,
-                      counts
-                  )
-              ]
-
-              if sum(
-                  count
-                  for _, count
-                  in histogram
-              ) != SIMS:
-
-                  raise RuntimeError(
-                      "Histogram compression failed."
-                  )
-
-              return histogram
-
-          # ==================================================
-          # TRAIN + SIMULATE
-          # ==================================================
-
-          results = []
-
-          for target, positions in specs.items():
-
-              print("")
-              print("-" * 72)
-              print("MODELING:", target)
-              print("-" * 72)
-
-              historical = model_df[
-                  model_df["position"].isin(
+              subset = frame[
+                  frame[
+                      "position_jpro"
+                  ].isin(
                       positions
                   )
               ].copy()
 
-              historical = historical[
-                  (
-                      historical["season"] < SEASON
-                  )
-                  |
-                  (
-                      (
-                          historical["season"] == SEASON
-                      )
-                      &
-                      (
-                          historical["week"] < WEEK
-                      )
-                  )
-              ].copy()
-
-              if target == "passing_yards":
-
-                  historical = historical[
-                      historical["position"] == "QB"
-                  ].copy()
-
-              historical = historical.sort_values(
-                  [
-                      "season",
-                      "week"
-                  ]
-              ).reset_index(
-                  drop=True
-              )
-
-              if len(historical) < 200:
-                  raise RuntimeError(
-                      f"Insufficient history for {target}"
-                  )
-
-              split = int(
-                  len(historical) * .80
-              )
-
-              fit_df = historical.iloc[
-                  :split
-              ].copy()
-
-              calibration_df = historical.iloc[
-                  split:
-              ].copy()
-
-              calibration_model = make_model()
-
-              calibration_model.fit(
-                  fit_df[feature_cols],
-                  fit_df[target]
-              )
-
-              calibration_pred = (
-                  calibration_model.predict(
-                      calibration_df[
-                          feature_cols
+              if subset.empty:
+                  return pd.DataFrame(
+                      columns=[
+                          "season",
+                          "week",
+                          "opponent_jpro",
+                          "allowed"
                       ]
                   )
+
+              subset[
+                  stat_name
+              ] = pd.to_numeric(
+                  subset[
+                      stat_name
+                  ],
+                  errors="coerce"
+              ).fillna(0.0)
+
+              totals = (
+                  subset
+                  .groupby(
+                      [
+                          "season",
+                          "week",
+                          "opponent_jpro"
+                      ],
+                      as_index=False
+                  )[stat_name]
+                  .sum()
+                  .rename(
+                      columns={
+                          stat_name:
+                              "allowed"
+                      }
+                  )
               )
 
-              residuals = (
-                  calibration_df[
-                      target
-                  ].to_numpy(
-                      dtype=float
+              return totals
+
+
+          matchup_tables = {}
+
+          for stat_name, positions in matchup_specs.items():
+              if stat_name not in stats.columns:
+                  continue
+
+              matchup_tables[
+                  stat_name
+              ] = defensive_game_totals(
+                  opponent_rows,
+                  stat_name,
+                  positions
+              )
+
+
+          def matchup_label(score):
+              if score >= 65:
+                  return "FAVORABLE"
+
+              if score <= 35:
+                  return "TOUGH"
+
+              return "NEUTRAL"
+
+
+          def build_matchup(
+              defense,
+              stat_name
+          ):
+              table = matchup_tables.get(
+                  stat_name
+              )
+
+              if table is None or table.empty:
+                  return {
+                      "matchup_score": 50.0,
+                      "matchup_label": "NEUTRAL",
+                      "allowed_per_game": 0.0,
+                      "league_per_game": 0.0,
+                      "allowed_vs_league_ratio": 1.0,
+                      "current_season_allowed": 0.0,
+                      "historical_allowed": 0.0,
+                      "current_season_games": 0,
+                      "method":
+                          "SHRUNK_DEFENSIVE_PRODUCTION"
+                  }
+
+              defense = normalize_team(
+                  defense
+              )
+
+              current_games = table[
+                  (
+                      table[
+                          "opponent_jpro"
+                      ] == defense
                   )
-                  -
-                  calibration_pred
+                  &
+                  (
+                      table[
+                          "season"
+                      ] == SEASON
+                  )
+              ]
+
+              # Historical baseline intentionally excludes 2026.
+              # This avoids double-counting the same current games.
+              historical_games = table[
+                  (
+                      table[
+                          "opponent_jpro"
+                      ] == defense
+                  )
+                  &
+                  (
+                      table[
+                          "season"
+                      ] < SEASON
+                  )
+              ]
+
+              league_current = table[
+                  table[
+                      "season"
+                  ] == SEASON
+              ]
+
+              league_history = table[
+                  table[
+                      "season"
+                  ] < SEASON
+              ]
+
+              current_avg = (
+                  safe_mean(
+                      current_games[
+                          "allowed"
+                      ]
+                  )
+                  if len(current_games)
+                  else 0.0
+              )
+
+              historical_avg = (
+                  safe_mean(
+                      historical_games[
+                          "allowed"
+                      ]
+                  )
+                  if len(historical_games)
+                  else 0.0
+              )
+
+              league_current_avg = (
+                  safe_mean(
+                      league_current[
+                          "allowed"
+                      ]
+                  )
+                  if len(league_current)
+                  else 0.0
+              )
+
+              league_history_avg = (
+                  safe_mean(
+                      league_history[
+                          "allowed"
+                      ]
+                  )
+                  if len(league_history)
+                  else 0.0
+              )
+
+              current_n = len(
+                  current_games
+              )
+
+              # Early season gets partial weight.
+              # Maximum current-season weight is 65%.
+              current_weight = min(
+                  current_n / 6.0,
+                  0.65
+              )
+
+              if current_n == 0:
+                  current_weight = 0.0
+
+              historical_weight = (
+                  1.0 -
+                  current_weight
+              )
+
+              if historical_avg <= 0:
+                  historical_avg = (
+                      league_history_avg
+                      if league_history_avg > 0
+                      else league_current_avg
+                  )
+
+              if current_avg <= 0:
+                  current_avg = (
+                      historical_avg
+                  )
+
+              blended_allowed = (
+                  current_avg
+                  * current_weight
+                  +
+                  historical_avg
+                  * historical_weight
+              )
+
+              league_reference = (
+                  league_current_avg
+                  * current_weight
+                  +
+                  league_history_avg
+                  * historical_weight
+              )
+
+              if league_reference <= 0:
+                  league_reference = (
+                      blended_allowed
+                      if blended_allowed > 0
+                      else 1.0
+                  )
+
+              ratio = (
+                  blended_allowed /
+                  league_reference
+              )
+
+              score = (
+                  50.0 +
+                  (
+                      ratio - 1.0
+                  )
+                  * 100.0
+              )
+
+              score = float(
+                  np.clip(
+                      score,
+                      0,
+                      100
+                  )
+              )
+
+              return {
+                  "matchup_score":
+                      round(
+                          score,
+                          2
+                      ),
+
+                  "matchup_label":
+                      matchup_label(
+                          score
+                      ),
+
+                  "allowed_per_game":
+                      round(
+                          blended_allowed,
+                          2
+                      ),
+
+                  "league_per_game":
+                      round(
+                          league_reference,
+                          2
+                      ),
+
+                  "allowed_vs_league_ratio":
+                      round(
+                          ratio,
+                          4
+                      ),
+
+                  "current_season_allowed":
+                      round(
+                          current_avg,
+                          2
+                      ),
+
+                  "historical_allowed":
+                      round(
+                          historical_avg,
+                          2
+                      ),
+
+                  "current_season_games":
+                      int(
+                          current_n
+                      ),
+
+                  "method":
+                      "SHRUNK_DEFENSIVE_PRODUCTION"
+              }
+
+          # ========================================================
+          # MODEL + SIMULATION
+          # ========================================================
+
+          projections = []
+
+          for target, spec in available_targets.items():
+
+              print("")
+              print(
+                  "Building:",
+                  target
+              )
+
+              target_features = [
+                  f"{target}_lag1",
+                  f"{target}_avg3",
+                  f"{target}_avg5",
+                  f"{target}_std5",
+                  "week_feature",
+                  "season_feature"
+              ]
+
+              model_rows = stats[
+                  stats[
+                      "position_jpro"
+                  ].isin(
+                      spec[
+                          "positions"
+                      ]
+                  )
+              ].copy()
+
+              model_rows = model_rows[
+                  model_rows[
+                      target
+                  ].notna()
+              ].copy()
+
+              model_rows = model_rows[
+                  model_rows[
+                      f"{target}_lag1"
+                  ].notna()
+              ].copy()
+
+              if len(model_rows) < 100:
+                  print(
+                      "Skipping - insufficient rows."
+                  )
+                  continue
+
+              X = (
+                  model_rows[
+                      target_features
+                  ]
+                  .replace(
+                      [
+                          np.inf,
+                          -np.inf
+                      ],
+                      np.nan
+                  )
+                  .fillna(0.0)
+              )
+
+              y = pd.to_numeric(
+                  model_rows[target],
+                  errors="coerce"
+              ).fillna(0.0)
+
+              split = int(
+                  len(model_rows)
+                  * 0.80
+              )
+
+              split = max(
+                  1,
+                  min(
+                      split,
+                      len(model_rows) - 1
+                  )
+              )
+
+              train_X = X.iloc[
+                  :split
+              ]
+
+              train_y = y.iloc[
+                  :split
+              ]
+
+              valid_X = X.iloc[
+                  split:
+              ]
+
+              valid_y = y.iloc[
+                  split:
+              ]
+
+              validation_model = Pipeline([
+                  (
+                      "scale",
+                      StandardScaler()
+                  ),
+                  (
+                      "ridge",
+                      Ridge(
+                          alpha=10.0
+                      )
+                  )
+              ])
+
+              validation_model.fit(
+                  train_X,
+                  train_y
+              )
+
+              if len(valid_X):
+                  valid_predictions = (
+                      validation_model
+                      .predict(
+                          valid_X
+                      )
+                  )
+
+                  residuals = (
+                      valid_y.to_numpy()
+                      -
+                      valid_predictions
+                  )
+
+              else:
+                  residuals = (
+                      train_y.to_numpy()
+                      -
+                      validation_model.predict(
+                          train_X
+                      )
+                  )
+
+              residuals = np.asarray(
+                  residuals,
+                  dtype=float
               )
 
               residuals = residuals[
@@ -1362,150 +1871,157 @@ jobs:
                   )
               ]
 
-              if len(residuals) < 100:
-                  raise RuntimeError(
-                      f"Insufficient residuals for {target}"
+              if len(residuals) < 20:
+                  residuals = np.array(
+                      [0.0]
                   )
 
-              final_model = make_model()
+              final_model = Pipeline([
+                  (
+                      "scale",
+                      StandardScaler()
+                  ),
+                  (
+                      "ridge",
+                      Ridge(
+                          alpha=10.0
+                      )
+                  )
+              ])
 
               final_model.fit(
-                  historical[
-                      feature_cols
-                  ],
-                  historical[
-                      target
-                  ]
+                  X,
+                  y
               )
 
-              eligible = current[
-                  current["position"].isin(
-                      positions
+              current_rows = latest_current[
+                  latest_current[
+                      "position_jpro"
+                  ].isin(
+                      spec[
+                          "positions"
+                      ]
                   )
               ].copy()
 
-              if target == "passing_yards":
+              for _, row in current_rows.iterrows():
 
-                  eligible = eligible[
-                      eligible["position"] == "QB"
-                  ].copy()
+                  team = normalize_team(
+                      row[
+                          "team_jpro"
+                      ]
+                  )
 
-              if eligible.empty:
-                  continue
+                  game_info = (
+                      team_to_game
+                      .get(team)
+                  )
 
-              projections = final_model.predict(
-                  eligible[
-                      feature_cols
-                  ]
-              )
+                  if not game_info:
+                      continue
 
-              for i, (_, row) in enumerate(
-                  eligible.iterrows()
-              ):
+                  feature_values = pd.DataFrame(
+                      [
+                          {
+                              feature:
+                                  clean_number(
+                                      row.get(
+                                          feature,
+                                          0.0
+                                      )
+                                  )
+                              for feature
+                              in target_features
+                          }
+                      ]
+                  )
+
+                  projection = float(
+                      final_model.predict(
+                          feature_values
+                      )[0]
+                  )
 
                   projection = max(
-                      0.0,
-                      float(
-                          projections[i]
+                      projection,
+                      0.0
+                  )
+
+                  if (
+                      projection
+                      <
+                      spec[
+                          "min_projection"
+                      ]
+                  ):
+                      continue
+
+                  sampled_residuals = (
+                      RNG.choice(
+                          residuals,
+                          size=SIMS,
+                          replace=True
                       )
                   )
 
-                  # ------------------------------------------
-                  # LOW-INFORMATION FILTER
-                  # ------------------------------------------
-
-                  if (
-                      target == "passing_yards"
-                      and projection < 25
-                  ):
-                      continue
-
-                  if (
-                      target == "rushing_yards"
-                      and projection < 3
-                  ):
-                      continue
-
-                  if (
-                      target == "receiving_yards"
-                      and projection < 5
-                  ):
-                      continue
-
-                  if (
-                      target == "receptions"
-                      and projection < .5
-                  ):
-                      continue
-
-                  # ------------------------------------------
-                  # 20K EMPIRICAL DISTRIBUTION
-                  # ------------------------------------------
-
-                  sampled_errors = np.random.choice(
-                      residuals,
-                      size=SIMS,
-                      replace=True
+                  simulations = (
+                      projection
+                      +
+                      sampled_residuals
                   )
 
-                  sims = (
-                      projection +
-                      sampled_errors
+                  simulations = np.clip(
+                      simulations,
+                      0,
+                      None
                   )
 
-                  sims = np.maximum(
-                      sims,
-                      0
-                  )
-
-                  sims = np.rint(
-                      sims
+                  simulations = np.rint(
+                      simulations
                   ).astype(int)
 
-                  histogram = compress_distribution(
-                      sims
+                  histogram = (
+                      compress_histogram(
+                          simulations
+                      )
                   )
+
+                  if (
+                      sum(
+                          count
+                          for _, count
+                          in histogram
+                      )
+                      != SIMS
+                  ):
+                      raise RuntimeError(
+                          "Histogram simulation-count audit failed."
+                      )
 
                   player_id = str(
-                      row["player_id"]
+                      row[
+                          "player_id_jpro"
+                      ]
                   )
 
-                  team = str(
-                      row["recent_team"]
+                  opponent = game_info[
+                      "opponent"
+                  ]
+
+                  role = build_role(
+                      player_id
                   )
 
-                  opponent = str(
-                      row["opponent"]
+                  matchup = build_matchup(
+                      opponent,
+                      target
                   )
 
-                  role = role_cache.get(
-                      player_id,
-                      {}
-                  )
-
-                  matchup = (
-                      matchup_cache
-                      .get(
-                          opponent,
-                          {}
-                      )
-                      .get(
-                          target,
-                          {}
-                      )
-                  )
-
-                  result = {
-
-                      "player_id":
-                          player_id,
-
-                      "player":
-                          str(
-                              row[
-                                  "player_display_name"
-                              ]
-                          ),
+                  projections.append({
+                      "game":
+                          game_info[
+                              "game"
+                          ],
 
                       "team":
                           team,
@@ -1513,14 +2029,21 @@ jobs:
                       "opponent":
                           opponent,
 
-                      "position":
+                      "player_id":
+                          player_id,
+
+                      "player":
                           str(
-                              row["position"]
+                              row[
+                                  "player_name_jpro"
+                              ]
                           ),
 
-                      "game":
+                      "position":
                           str(
-                              row["game"]
+                              row[
+                                  "position_jpro"
+                              ]
                           ),
 
                       "prop":
@@ -1532,95 +2055,73 @@ jobs:
                               2
                           ),
 
-                      "sim_mean":
-                          round(
-                              float(
-                                  np.mean(sims)
-                              ),
-                              2
-                          ),
-
                       "median":
                           round(
-                              float(
-                                  np.median(sims)
+                              percentile(
+                                  simulations,
+                                  50
                               ),
                               2
                           ),
 
                       "p10":
                           round(
-                              float(
-                                  np.percentile(
-                                      sims,
-                                      10
-                                  )
+                              percentile(
+                                  simulations,
+                                  10
                               ),
                               2
                           ),
 
                       "p25":
                           round(
-                              float(
-                                  np.percentile(
-                                      sims,
-                                      25
-                                  )
+                              percentile(
+                                  simulations,
+                                  25
                               ),
                               2
                           ),
 
                       "p75":
                           round(
-                              float(
-                                  np.percentile(
-                                      sims,
-                                      75
-                                  )
+                              percentile(
+                                  simulations,
+                                  75
                               ),
                               2
                           ),
 
                       "p90":
                           round(
-                              float(
-                                  np.percentile(
-                                      sims,
-                                      90
-                                  )
+                              percentile(
+                                  simulations,
+                                  90
                               ),
                               2
                           ),
 
-                      "simulation_count":
-                          SIMS,
-
                       "simulation_histogram":
                           histogram,
 
-                      "latest_data_week":
-                          int(
-                              row["week"]
-                          ),
+                      "simulation_count":
+                          SIMS,
 
                       "role":
                           role,
 
                       "matchup":
                           matchup
-                  }
+                  })
 
-                  results.append(
-                      result
-                  )
-
-          # ==================================================
+          # ========================================================
           # SORT OUTPUT
-          # ==================================================
+          # ========================================================
 
           game_order = {
-              game["game"]: i
-              for i, game
+              game[
+                  "game"
+              ]: index
+              for index, game
               in enumerate(games)
           }
 
@@ -1631,7 +2132,8 @@ jobs:
               "receptions": 3
           }
 
-          results.sort(
+          projections = sorted(
+              projections,
               key=lambda x: (
                   game_order.get(
                       x["game"],
@@ -1641,17 +2143,16 @@ jobs:
                   x["player"],
                   prop_order.get(
                       x["prop"],
-                      999
+                      99
                   )
               )
           )
 
-          # ==================================================
+          # ========================================================
           # OUTPUT
-          # ==================================================
+          # ========================================================
 
           output = {
-
               "status":
                   "READY",
 
@@ -1667,19 +2168,14 @@ jobs:
               "slate":
                   f"{SEASON} Week {WEEK}",
 
-              "game":
-                  games[0]["game"]
-                  if games
-                  else "Current Slate",
+              "games_count":
+                  len(games),
 
-              "games":
-                  games,
+              "player_props_count":
+                  len(projections),
 
-              "simulations_per_prop":
+              "simulations_each":
                   SIMS,
-
-              "distribution_format":
-                  "COMPRESSED_EMPIRICAL_HISTOGRAM",
 
               "role_intelligence":
                   True,
@@ -1687,32 +2183,29 @@ jobs:
               "matchup_intelligence":
                   True,
 
-              "matchup_method":
-                  "SHRUNK_DEFENSIVE_PRODUCTION",
+              "role_version":
+                  "V1_AWAITING_OPPORTUNITY_UPGRADE",
 
-              "generated_at_utc":
-                  datetime.now(
-                      timezone.utc
-                  ).isoformat(),
-
-              "sportsbook_line_mode":
-                  "MANUAL_IPHONE_INPUT",
-
-              "sportsbook_lines_connected":
-                  False,
+              "games":
+                  games,
 
               "projections":
-                  results
+                  projections
           }
 
-          with open(
-              "data/jpro-current-projections.json",
-              "w"
-          ) as f:
+          output_path = (
+              "data/"
+              "jpro-current-projections.json"
+          )
 
+          with open(
+              output_path,
+              "w",
+              encoding="utf-8"
+          ) as file:
               json.dump(
                   output,
-                  f,
+                  file,
                   separators=(
                       ",",
                       ":"
@@ -1721,263 +2214,350 @@ jobs:
 
           print("")
           print("=" * 72)
-          print("JPRO MATCHUP INTELLIGENCE READY")
+          print("JPRO BUILD COMPLETE")
           print("=" * 72)
 
           print(
-              "GAMES:",
-              len(games)
+              "Status:",
+              output[
+                  "status"
+              ]
           )
 
           print(
-              "PLAYER PROPS:",
-              len(results)
+              "Slate:",
+              output[
+                  "slate"
+              ]
           )
 
           print(
-              "ROLE PROFILES:",
-              len(role_cache)
+              "Games:",
+              output[
+                  "games_count"
+              ]
           )
 
           print(
-              "DEFENSE PROFILES:",
-              len(matchup_cache)
+              "Player props:",
+              output[
+                  "player_props_count"
+              ]
           )
 
           print(
-              "SIMS PER PROP:",
-              SIMS
+              "Simulations each:",
+              output[
+                  "simulations_each"
+              ]
           )
 
-          print("=" * 72)
+          print(
+              "Saved:",
+              output_path
+          )
 
           PY
+
+      # ============================================================
+      # VERIFY
+      # ============================================================
 
       - name: Verify JPro matchup intelligence
         run: |
           python <<'PY'
           import json
+          import statistics
 
-          SIMS = 20000
+          path = (
+              "data/"
+              "jpro-current-projections.json"
+          )
 
           with open(
-              "data/jpro-current-projections.json"
-          ) as f:
-
-              d = json.load(f)
-
-          print("=" * 72)
-          print("JPRO MATCHUP INTELLIGENCE AUDIT")
-          print("=" * 72)
-
-          print(
-              "ENGINE:",
-              d.get("engine_version")
-          )
-
-          print(
-              "SLATE:",
-              d.get("slate")
-          )
-
-          print(
-              "GAMES:",
-              len(
-                  d.get(
-                      "games",
-                      []
-                  )
+              path,
+              "r",
+              encoding="utf-8"
+          ) as file:
+              data = json.load(
+                  file
               )
-          )
 
-          projections = d.get(
+          print("=" * 72)
+          print("JPRO MATCHUP INTELLIGENCE VERIFY")
+          print("=" * 72)
+
+          projections = data.get(
               "projections",
               []
           )
 
+          games = data.get(
+              "games",
+              []
+          )
+
           print(
-              "PLAYER PROPS:",
+              "Engine:",
+              data.get(
+                  "engine_version"
+              )
+          )
+
+          print(
+              "Status:",
+              data.get(
+                  "status"
+              )
+          )
+
+          print(
+              "Slate:",
+              data.get(
+                  "slate"
+              )
+          )
+
+          print(
+              "Games:",
+              len(games)
+          )
+
+          print(
+              "Player props:",
               len(projections)
           )
 
-          if not d.get(
-              "role_intelligence"
-          ):
-              raise RuntimeError(
-                  "Role intelligence missing."
+          print(
+              "Simulations each:",
+              data.get(
+                  "simulations_each"
               )
-
-          if not d.get(
-              "matchup_intelligence"
-          ):
-              raise RuntimeError(
-                  "Matchup intelligence missing."
-              )
+          )
 
           if not projections:
               raise RuntimeError(
-                  "No projections."
+                  "No projections found."
               )
+
+          bad_histograms = []
 
           role_count = 0
           matchup_count = 0
+          matchup_scores = []
 
-          scores = []
+          for prop in projections:
 
-          for x in projections:
-
-              histogram = x.get(
+              histogram = prop.get(
                   "simulation_histogram",
                   []
               )
 
-              represented = sum(
+              total = sum(
                   int(entry[1])
-                  for entry
-                  in histogram
+                  for entry in histogram
               )
 
-              if represented != SIMS:
-                  raise RuntimeError(
-                      "20K distribution mismatch."
+              if total != 20000:
+                  bad_histograms.append(
+                      (
+                          prop.get(
+                              "player"
+                          ),
+                          prop.get(
+                              "prop"
+                          ),
+                          total
+                      )
                   )
 
-              role = x.get(
-                  "role",
-                  {}
+              role = prop.get(
+                  "role"
               )
 
-              if (
-                  "role_score" in role
-                  and
-                  "role_label" in role
-              ):
+              if role:
                   role_count += 1
 
-              matchup = x.get(
-                  "matchup",
-                  {}
+              matchup = prop.get(
+                  "matchup"
               )
 
-              if (
-                  "matchup_score" in matchup
-                  and
-                  "matchup_label" in matchup
-              ):
-
+              if matchup:
                   matchup_count += 1
 
                   score = float(
-                      matchup[
-                          "matchup_score"
-                      ]
+                      matchup.get(
+                          "matchup_score",
+                          0
+                      )
                   )
 
-                  if not (
-                      0 <= score <= 100
+                  if (
+                      score < 0
+                      or
+                      score > 100
                   ):
                       raise RuntimeError(
-                          "Invalid matchup score."
+                          "Matchup score outside 0-100."
                       )
 
-                  scores.append(score)
+                  matchup_scores.append(
+                      score
+                  )
 
+          if bad_histograms:
+              raise RuntimeError(
+                  f"Histogram audit failed: {bad_histograms[:5]}"
+              )
+
+          print("")
           print(
-              "PROPS WITH ROLE DATA:",
+              "Props with role data:",
               role_count
           )
 
           print(
-              "PROPS WITH MATCHUP DATA:",
+              "Props with matchup data:",
               matchup_count
           )
 
-          if matchup_count == 0:
-              raise RuntimeError(
-                  "No matchup profiles attached."
-              )
-
-          if scores:
+          if matchup_scores:
 
               print(
-                  "MATCHUP SCORE RANGE:",
-                  round(min(scores), 1),
-                  "to",
-                  round(max(scores), 1)
-              )
-
-              print(
-                  "MATCHUP SCORE AVG:",
+                  "Matchup score min:",
                   round(
-                      sum(scores) /
-                      len(scores),
-                      1
+                      min(
+                          matchup_scores
+                      ),
+                      2
+                  )
+              )
+
+              print(
+                  "Matchup score max:",
+                  round(
+                      max(
+                          matchup_scores
+                      ),
+                      2
+                  )
+              )
+
+              print(
+                  "Matchup score avg:",
+                  round(
+                      statistics.mean(
+                          matchup_scores
+                      ),
+                      2
                   )
               )
 
           print("")
+          print("=" * 72)
           print("MATCHUP PREVIEW")
-          print("-" * 72)
+          print("=" * 72)
 
-          shown = 0
+          for prop in projections[:25]:
 
-          for x in projections:
+              role = prop.get(
+                  "role",
+                  {}
+              )
 
-              matchup = x.get(
+              matchup = prop.get(
                   "matchup",
                   {}
               )
 
-              if not matchup:
-                  continue
+              print("")
+              print(
+                  prop.get(
+                      "player"
+                  ),
+                  "|",
+                  prop.get(
+                      "team"
+                  ),
+                  "vs",
+                  prop.get(
+                      "opponent"
+                  )
+              )
 
               print(
-                  x["player"],
-                  "|",
-                  x["team"],
-                  "vs",
-                  x["opponent"],
-                  "|",
-                  x["prop"],
-                  "| MATCHUP:",
+                  "  PROP:",
+                  prop.get(
+                      "prop"
+                  )
+              )
+
+              print(
+                  "  PROJECTION:",
+                  prop.get(
+                      "projection"
+                  )
+              )
+
+              print(
+                  "  ROLE:",
+                  role.get(
+                      "role_label"
+                  ),
+                  role.get(
+                      "role_score"
+                  )
+              )
+
+              print(
+                  "  MATCHUP:",
                   matchup.get(
                       "matchup_label"
                   ),
                   matchup.get(
                       "matchup_score"
-                  ),
-                  "| ALLOWED:",
+                  )
+              )
+
+              print(
+                  "  ALLOWED:",
                   matchup.get(
                       "allowed_per_game"
                   ),
                   "| LEAGUE:",
                   matchup.get(
                       "league_per_game"
-                  ),
-                  "| RATIO:",
-                  matchup.get(
-                      "allowed_vs_league_ratio"
-                  ),
-                  "| 2026 GAMES:",
+                  )
+              )
+
+              print(
+                  "  2026 GAMES:",
                   matchup.get(
                       "current_season_games"
                   )
               )
 
-              shown += 1
-
-              if shown >= 25:
-                  break
-
           print("")
-          print(
-              "JPRO MATCHUP INTELLIGENCE AUDIT PASSED"
-          )
+          print("=" * 72)
+          print("VERIFY COMPLETE")
+          print("=" * 72)
 
           PY
 
+      # ============================================================
+      # SAVE GENERATED DATA
+      # ============================================================
+
       - name: Save JPro matchup intelligence
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "JPro: add opponent matchup intelligence"
-          file_pattern: data/jpro-current-projections.json
+        run: |
+          git config user.name "JPro Cloud Engine"
+          git config user.email "actions@github.com"
+
+          git add data/jpro-current-projections.json
+
+          if git diff --cached --quiet; then
+            echo "No JPro data changes to commit."
+          else
+            git commit -m "Update JPro matchup intelligence"
+            git push
+          fi
