@@ -24,7 +24,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install nflreadpy pandas numpy scikit-learn pyarrow
 
-      - name: Build JPro betting distributions
+      - name: Build JPro full slate
         run: |
           mkdir -p data
 
@@ -41,18 +41,182 @@ jobs:
           from sklearn.pipeline import Pipeline
           from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-          np.random.seed(20260921)
+          # ==================================================
+          # JPRO SETTINGS
+          # ==================================================
 
+          np.random.seed(20260922)
+
+          SEASON = 2026
+          WEEK = 3
           SIMS = 20000
-          TEAMS = ["NYG", "LA"]
 
-          print("=" * 60)
-          print("JPRO BETTING DISTRIBUTION ENGINE")
-          print("=" * 60)
+          print("=" * 70)
+          print("JPRO MODEL V2 — FULL SLATE ENGINE")
+          print("=" * 70)
 
-          # --------------------------------------------------
-          # LOAD REAL NFL DATA
-          # --------------------------------------------------
+          print("SEASON:", SEASON)
+          print("WEEK:", WEEK)
+          print("SIMULATIONS PER PROP:", SIMS)
+
+          # ==================================================
+          # LOAD 2026 NFL SCHEDULE
+          # ==================================================
+
+          print("")
+          print("LOADING NFL SCHEDULE...")
+
+          schedule = nfl.load_schedules([SEASON])
+
+          if hasattr(schedule, "to_pandas"):
+              schedule = schedule.to_pandas()
+
+          schedule = pd.DataFrame(schedule)
+
+          print("SCHEDULE ROWS:", len(schedule))
+          print("SCHEDULE COLUMNS:", list(schedule.columns))
+
+          required_schedule = [
+              "season",
+              "week",
+              "away_team",
+              "home_team"
+          ]
+
+          missing_schedule = [
+              c
+              for c in required_schedule
+              if c not in schedule.columns
+          ]
+
+          if missing_schedule:
+              raise RuntimeError(
+                  f"Schedule missing columns: {missing_schedule}"
+              )
+
+          schedule["season"] = pd.to_numeric(
+              schedule["season"],
+              errors="coerce"
+          )
+
+          schedule["week"] = pd.to_numeric(
+              schedule["week"],
+              errors="coerce"
+          )
+
+          week_games = schedule[
+              (schedule["season"] == SEASON) &
+              (schedule["week"] == WEEK)
+          ].copy()
+
+          # Keep regular-season rows if game_type exists.
+          if "game_type" in week_games.columns:
+
+              regular = week_games[
+                  week_games["game_type"].astype(str).str.upper().isin(
+                      ["REG", "REGULAR", "REGULAR SEASON"]
+                  )
+              ].copy()
+
+              if not regular.empty:
+                  week_games = regular
+
+          week_games = week_games.dropna(
+              subset=[
+                  "away_team",
+                  "home_team"
+              ]
+          ).copy()
+
+          if week_games.empty:
+              raise RuntimeError(
+                  f"No games found for {SEASON} Week {WEEK}"
+              )
+
+          print("")
+          print(
+              "WEEK",
+              WEEK,
+              "GAMES FOUND:",
+              len(week_games)
+          )
+
+          # ==================================================
+          # BUILD GAME MAP
+          # ==================================================
+
+          games = []
+          team_to_game = {}
+
+          for _, row in week_games.iterrows():
+
+              away = str(
+                  row["away_team"]
+              ).strip()
+
+              home = str(
+                  row["home_team"]
+              ).strip()
+
+              game_name = f"{away} @ {home}"
+
+              game = {
+                  "game": game_name,
+                  "away_team": away,
+                  "home_team": home
+              }
+
+              if (
+                  "gameday" in week_games.columns
+                  and pd.notna(row.get("gameday"))
+              ):
+                  game["gameday"] = str(
+                      row.get("gameday")
+                  )
+
+              if (
+                  "gametime" in week_games.columns
+                  and pd.notna(row.get("gametime"))
+              ):
+                  game["gametime"] = str(
+                      row.get("gametime")
+                  )
+
+              if (
+                  "weekday" in week_games.columns
+                  and pd.notna(row.get("weekday"))
+              ):
+                  game["weekday"] = str(
+                      row.get("weekday")
+                  )
+
+              games.append(game)
+
+              team_to_game[away] = game_name
+              team_to_game[home] = game_name
+
+              print("GAME:", game_name)
+
+          slate_teams = sorted(
+              team_to_game.keys()
+          )
+
+          print("")
+          print(
+              "SLATE TEAMS:",
+              len(slate_teams)
+          )
+
+          print(
+              ", ".join(slate_teams)
+          )
+
+          # ==================================================
+          # LOAD REAL NFL PLAYER DATA
+          # ==================================================
+
+          print("")
+          print("LOADING NFL PLAYER DATA...")
 
           df = nfl.load_player_stats(
               [2022, 2023, 2024, 2025, 2026]
@@ -86,16 +250,18 @@ jobs:
           ] + targets
 
           missing = [
-              c for c in required
+              c
+              for c in required
               if c not in df.columns
           ]
 
           if missing:
               raise RuntimeError(
-                  f"Missing required columns: {missing}"
+                  f"Missing required player columns: {missing}"
               )
 
           for col in targets:
+
               df[col] = pd.to_numeric(
                   df[col],
                   errors="coerce"
@@ -115,19 +281,38 @@ jobs:
               subset=[
                   "player_id",
                   "season",
-                  "week"
+                  "week",
+                  "recent_team"
               ]
           ).copy()
 
+          df["recent_team"] = (
+              df["recent_team"]
+              .astype(str)
+              .str.strip()
+          )
+
           df = df.sort_values(
-              ["player_id", "season", "week"]
-          ).reset_index(drop=True)
+              [
+                  "player_id",
+                  "season",
+                  "week"
+              ]
+          ).reset_index(
+              drop=True
+          )
 
-          print("REAL NFL ROWS:", len(df))
+          print(
+              "REAL NFL PLAYER ROWS:",
+              len(df)
+          )
 
-          # --------------------------------------------------
-          # LEAKAGE-SAFE FEATURES
-          # --------------------------------------------------
+          # ==================================================
+          # LEAKAGE-SAFE PLAYER FEATURES
+          # ==================================================
+
+          print("")
+          print("BUILDING LEAKAGE-SAFE FEATURES...")
 
           group = df.groupby(
               "player_id",
@@ -144,11 +329,11 @@ jobs:
                   group[stat].transform(
                       lambda x:
                       x.shift(1)
-                       .rolling(
-                           3,
-                           min_periods=1
-                       )
-                       .mean()
+                      .rolling(
+                          3,
+                          min_periods=1
+                      )
+                      .mean()
                   )
               )
 
@@ -156,11 +341,11 @@ jobs:
                   group[stat].transform(
                       lambda x:
                       x.shift(1)
-                       .rolling(
-                           5,
-                           min_periods=1
-                       )
-                       .mean()
+                      .rolling(
+                          5,
+                          min_periods=1
+                      )
+                      .mean()
                   )
               )
 
@@ -168,23 +353,30 @@ jobs:
                   group[stat].transform(
                       lambda x:
                       x.shift(1)
-                       .rolling(
-                           5,
-                           min_periods=2
-                       )
-                       .std()
+                      .rolling(
+                          5,
+                          min_periods=2
+                      )
+                      .std()
                   )
               )
 
-          df["games_before"] = group.cumcount()
+          df["games_before"] = (
+              group.cumcount()
+          )
 
           model_df = df[
               df["games_before"] >= 3
           ].copy()
 
-          # --------------------------------------------------
+          print(
+              "MODEL ROWS:",
+              len(model_df)
+          )
+
+          # ==================================================
           # MODEL FEATURES
-          # --------------------------------------------------
+          # ==================================================
 
           feature_cols = [
               "season",
@@ -216,7 +408,8 @@ jobs:
           ]
 
           numeric_features = [
-              x for x in feature_cols
+              x
+              for x in feature_cols
               if x not in [
                   "position",
                   "recent_team"
@@ -229,7 +422,10 @@ jobs:
           ]
 
           specs = {
-              "passing_yards": ["QB"],
+
+              "passing_yards": [
+                  "QB"
+              ],
 
               "rushing_yards": [
                   "QB",
@@ -250,72 +446,78 @@ jobs:
               ]
           }
 
-          # --------------------------------------------------
-          # CURRENT NYG / LA PLAYERS
-          # --------------------------------------------------
+          # ==================================================
+          # CURRENT WEEK PLAYER STATE
+          # ==================================================
+
+          #
+          # IMPORTANT:
+          #
+          # We use each player's latest available 2026 row
+          # BEFORE Week 3 as the state used to project Week 3.
+          #
+          # This prevents Week 3 results from leaking into
+          # Week 3 projections if the workflow is rerun later.
+          #
+
+          current_pool = model_df[
+              (model_df["season"] == SEASON) &
+              (model_df["week"] < WEEK)
+          ].copy()
+
+          if current_pool.empty:
+              raise RuntimeError(
+                  "No pre-Week-3 player state found."
+              )
 
           current = (
-              model_df[
-                  model_df["season"] == 2026
-              ]
+              current_pool
               .sort_values(
-                  ["player_id", "week"]
+                  [
+                      "player_id",
+                      "week"
+                  ]
               )
-              .groupby("player_id")
+              .groupby(
+                  "player_id"
+              )
               .tail(1)
               .copy()
           )
 
           current = current[
               current["recent_team"].isin(
-                  TEAMS
+                  slate_teams
               )
           ].copy()
 
+          current["game"] = (
+              current["recent_team"]
+              .map(team_to_game)
+          )
+
+          current = current.dropna(
+              subset=[
+                  "game"
+              ]
+          ).copy()
+
+          print("")
           print(
-              "CURRENT NYG/LA PLAYERS:",
+              "CURRENT SLATE PLAYERS:",
               len(current)
           )
 
           if current.empty:
               raise RuntimeError(
-                  "No current NYG/LA players found."
+                  "No current players matched the Week 3 slate."
               )
 
-          # --------------------------------------------------
-          # TRAIN + CREATE 20K DISTRIBUTIONS
-          # --------------------------------------------------
+          # ==================================================
+          # PREPROCESSOR FACTORY
+          # ==================================================
 
-          results = []
-
-          for target, positions in specs.items():
-
-              historical = model_df[
-                  model_df["position"].isin(
-                      positions
-                  )
-              ].copy()
-
-              if target == "passing_yards":
-                  historical = historical[
-                      historical["position"] == "QB"
-                  ]
-
-              historical = historical.sort_values(
-                  ["season", "week"]
-              ).reset_index(drop=True)
-
-              split = int(
-                  len(historical) * 0.80
-              )
-
-              fit_df = historical.iloc[
-                  :split
-              ].copy()
-
-              calibration_df = historical.iloc[
-                  split:
-              ].copy()
+          def make_model():
 
               preprocessor = ColumnTransformer(
                   transformers=[
@@ -360,7 +562,7 @@ jobs:
                   ]
               )
 
-              model = Pipeline(
+              return Pipeline(
                   steps=[
                       (
                           "prep",
@@ -375,13 +577,133 @@ jobs:
                   ]
               )
 
+          # ==================================================
+          # COMPRESS 20K DISTRIBUTION
+          # ==================================================
+
+          def compress_distribution(sims):
+
+              values, counts = np.unique(
+                  sims,
+                  return_counts=True
+              )
+
+              histogram = [
+                  [
+                      int(value),
+                      int(count)
+                  ]
+                  for value, count
+                  in zip(values, counts)
+              ]
+
+              if (
+                  sum(
+                      count
+                      for _, count
+                      in histogram
+                  )
+                  != SIMS
+              ):
+                  raise RuntimeError(
+                      "Histogram compression lost simulations."
+                  )
+
+              return histogram
+
+          # ==================================================
+          # TRAIN + SIMULATE FULL SLATE
+          # ==================================================
+
+          results = []
+
+          for target, positions in specs.items():
+
+              print("")
+              print("-" * 70)
+              print("BUILDING:", target)
+              print("-" * 70)
+
+              historical = model_df[
+                  model_df["position"].isin(
+                      positions
+                  )
+              ].copy()
+
+              #
+              # Do not train on the target week or later.
+              # This keeps this Week 3 snapshot genuinely
+              # pregame even if future data becomes available.
+              #
+
+              historical = historical[
+                  (
+                      historical["season"] < SEASON
+                  ) |
+                  (
+                      (
+                          historical["season"] == SEASON
+                      ) &
+                      (
+                          historical["week"] < WEEK
+                      )
+                  )
+              ].copy()
+
+              if target == "passing_yards":
+
+                  historical = historical[
+                      historical["position"] == "QB"
+                  ].copy()
+
+              historical = historical.sort_values(
+                  [
+                      "season",
+                      "week"
+                  ]
+              ).reset_index(
+                  drop=True
+              )
+
+              if len(historical) < 200:
+                  raise RuntimeError(
+                      f"Not enough historical rows for {target}"
+                  )
+
+              split = int(
+                  len(historical) *
+                  0.80
+              )
+
+              fit_df = historical.iloc[
+                  :split
+              ].copy()
+
+              calibration_df = historical.iloc[
+                  split:
+              ].copy()
+
+              if (
+                  fit_df.empty
+                  or calibration_df.empty
+              ):
+                  raise RuntimeError(
+                      f"Invalid train/calibration split for {target}"
+                  )
+
               # ----------------------------------------------
-              # CALIBRATION RESIDUALS
+              # CALIBRATION MODEL
               # ----------------------------------------------
 
+              model = make_model()
+
               model.fit(
-                  fit_df[feature_cols],
-                  fit_df[target]
+                  fit_df[
+                      feature_cols
+                  ],
+                  fit_df[
+                      target
+                  ]
               )
 
               calibration_pred = model.predict(
@@ -393,13 +715,17 @@ jobs:
               residuals = (
                   calibration_df[
                       target
-                  ].to_numpy(dtype=float)
+                  ].to_numpy(
+                      dtype=float
+                  )
                   -
                   calibration_pred
               )
 
               residuals = residuals[
-                  np.isfinite(residuals)
+                  np.isfinite(
+                      residuals
+                  )
               ]
 
               if len(residuals) < 100:
@@ -407,13 +733,36 @@ jobs:
                       f"Insufficient residuals for {target}"
                   )
 
+              print(
+                  "CALIBRATION RESIDUALS:",
+                  len(residuals)
+              )
+
+              print(
+                  "RESIDUAL STD:",
+                  round(
+                      float(
+                          np.std(
+                              residuals
+                          )
+                      ),
+                      3
+                  )
+              )
+
               # ----------------------------------------------
-              # FINAL MODEL FIT
+              # FINAL MODEL
               # ----------------------------------------------
 
-              model.fit(
-                  historical[feature_cols],
-                  historical[target]
+              final_model = make_model()
+
+              final_model.fit(
+                  historical[
+                      feature_cols
+                  ],
+                  historical[
+                      target
+                  ]
               )
 
               eligible = current[
@@ -423,16 +772,26 @@ jobs:
               ].copy()
 
               if target == "passing_yards":
+
                   eligible = eligible[
                       eligible["position"] == "QB"
-                  ]
+                  ].copy()
 
               if eligible.empty:
+
+                  print(
+                      "NO ELIGIBLE PLAYERS"
+                  )
+
                   continue
 
-              projections = model.predict(
-                  eligible[feature_cols]
+              projections = final_model.predict(
+                  eligible[
+                      feature_cols
+                  ]
               )
+
+              retained = 0
 
               for i, (_, row) in enumerate(
                   eligible.iterrows()
@@ -440,8 +799,44 @@ jobs:
 
                   projection = max(
                       0.0,
-                      float(projections[i])
+                      float(
+                          projections[i]
+                      )
                   )
+
+                  # ------------------------------------------
+                  # REMOVE LOW-INFORMATION PROPS
+                  # BEFORE SPENDING SPACE ON OUTPUT
+                  # ------------------------------------------
+
+                  keep = True
+
+                  if (
+                      target == "passing_yards"
+                      and projection < 25
+                  ):
+                      keep = False
+
+                  if (
+                      target == "rushing_yards"
+                      and projection < 3
+                  ):
+                      keep = False
+
+                  if (
+                      target == "receiving_yards"
+                      and projection < 5
+                  ):
+                      keep = False
+
+                  if (
+                      target == "receptions"
+                      and projection < 0.5
+                  ):
+                      keep = False
+
+                  if not keep:
+                      continue
 
                   # ------------------------------------------
                   # 20,000 EMPIRICAL SIMULATIONS
@@ -455,7 +850,8 @@ jobs:
 
                   sims = (
                       projection
-                      + sampled_errors
+                      +
+                      sampled_errors
                   )
 
                   sims = np.maximum(
@@ -463,19 +859,26 @@ jobs:
                       0.0
                   )
 
-                  # NFL yard/reception results settle as
-                  # whole-number statistics.
                   sims = np.rint(
                       sims
-                  ).astype(int)
+                  ).astype(
+                      int
+                  )
 
-                  simulation_values = (
-                      sims.tolist()
+                  histogram = compress_distribution(
+                      sims
+                  )
+
+                  game_name = str(
+                      row["game"]
                   )
 
                   result = {
+
                       "player_id":
-                          str(row["player_id"]),
+                          str(
+                              row["player_id"]
+                          ),
 
                       "player":
                           str(
@@ -486,13 +889,20 @@ jobs:
 
                       "team":
                           str(
-                              row["recent_team"]
+                              row[
+                                  "recent_team"
+                              ]
                           ),
 
                       "position":
                           str(
-                              row["position"]
+                              row[
+                                  "position"
+                              ]
                           ),
+
+                      "game":
+                          game_name,
 
                       "prop":
                           target,
@@ -506,7 +916,9 @@ jobs:
                       "sim_mean":
                           round(
                               float(
-                                  np.mean(sims)
+                                  np.mean(
+                                      sims
+                                  )
                               ),
                               2
                           ),
@@ -514,7 +926,9 @@ jobs:
                       "median":
                           round(
                               float(
-                                  np.median(sims)
+                                  np.median(
+                                      sims
+                                  )
                               ),
                               2
                           ),
@@ -566,79 +980,112 @@ jobs:
                       "simulation_count":
                           SIMS,
 
-                      "simulation_values":
-                          simulation_values,
+                      "simulation_histogram":
+                          histogram,
 
                       "latest_data_week":
-                          int(row["week"])
+                          int(
+                              row[
+                                  "week"
+                              ]
+                          )
                   }
 
-                  # ------------------------------------------
-                  # REMOVE LOW-INFORMATION PROPS
-                  # ------------------------------------------
+                  results.append(
+                      result
+                  )
 
-                  keep = True
+                  retained += 1
 
-                  if (
-                      target == "passing_yards"
-                      and projection < 25
-                  ):
-                      keep = False
+                  print(
+                      result["player"],
+                      "|",
+                      result["team"],
+                      "|",
+                      game_name,
+                      "|",
+                      target,
+                      "| PROJ:",
+                      result["projection"],
+                      "| MEDIAN:",
+                      result["median"],
+                      "| HIST BINS:",
+                      len(histogram)
+                  )
 
-                  if (
-                      target == "rushing_yards"
-                      and projection < 3
-                  ):
-                      keep = False
+              print(
+                  "RETAINED",
+                  target,
+                  "PROPS:",
+                  retained
+              )
 
-                  if (
-                      target == "receiving_yards"
-                      and projection < 5
-                  ):
-                      keep = False
+          # ==================================================
+          # SORT OUTPUT
+          # ==================================================
 
-                  if (
-                      target == "receptions"
-                      and projection < 0.5
-                  ):
-                      keep = False
+          game_order = {
+              game["game"]: i
+              for i, game
+              in enumerate(games)
+          }
 
-                  if keep:
+          prop_order = {
+              "passing_yards": 0,
+              "rushing_yards": 1,
+              "receiving_yards": 2,
+              "receptions": 3
+          }
 
-                      results.append(
-                          result
-                      )
+          results.sort(
+              key=lambda x: (
+                  game_order.get(
+                      x["game"],
+                      999
+                  ),
+                  x["team"],
+                  x["player"],
+                  prop_order.get(
+                      x["prop"],
+                      999
+                  )
+              )
+          )
 
-                      print(
-                          result["player"],
-                          "|",
-                          target,
-                          "| PROJ:",
-                          result["projection"],
-                          "| MEDIAN:",
-                          result["median"],
-                          "| STORED SIMS:",
-                          len(
-                              simulation_values
-                          )
-                      )
-
-          # --------------------------------------------------
-          # SAVE APP-FRIENDLY BETTING JSON
-          # --------------------------------------------------
+          # ==================================================
+          # OUTPUT JSON
+          # ==================================================
 
           output = {
+
               "status":
                   "READY",
 
-              "game":
-                  "NYG @ LA",
+              "engine_version":
+                  "JPRO_FULL_SLATE_V1",
 
               "season":
-                  2026,
+                  SEASON,
+
+              "week":
+                  WEEK,
+
+              "slate":
+                  f"{SEASON} Week {WEEK}",
+
+              "game":
+                  games[0]["game"]
+                  if games
+                  else "Current Slate",
+
+              "games":
+                  games,
 
               "simulations_per_prop":
                   SIMS,
+
+              "distribution_format":
+                  "COMPRESSED_EMPIRICAL_HISTOGRAM",
 
               "generated_at_utc":
                   datetime.now(
@@ -659,20 +1106,33 @@ jobs:
               "data/jpro-current-projections.json",
               "w"
           ) as f:
+
               json.dump(
                   output,
                   f,
-                  separators=(",", ":")
+                  separators=(
+                      ",",
+                      ":"
+                  )
               )
 
+          # ==================================================
+          # SUMMARY
+          # ==================================================
+
           print("")
-          print("=" * 60)
-          print("JPRO BETTING DISTRIBUTIONS READY")
-          print("=" * 60)
+          print("=" * 70)
+          print("JPRO FULL SLATE READY")
+          print("=" * 70)
 
           print(
-              "GAME:",
-              output["game"]
+              "SLATE:",
+              output["slate"]
+          )
+
+          print(
+              "GAMES:",
+              len(games)
           )
 
           print(
@@ -686,27 +1146,32 @@ jobs:
           )
 
           print(
-              "TOTAL STORED OUTCOMES:",
+              "EMPIRICAL OUTCOMES REPRESENTED:",
               len(results) * SIMS
           )
 
-          print("=" * 60)
+          print("=" * 70)
 
           PY
 
-      - name: Verify JPro distributions
+      - name: Verify JPro full slate
         run: |
           python <<'PY'
           import json
 
+          SIMS = 20000
+
           with open(
               "data/jpro-current-projections.json"
           ) as f:
-              d = json.load(f)
 
-          print("=" * 60)
-          print("JPRO DISTRIBUTION AUDIT")
-          print("=" * 60)
+              d = json.load(
+                  f
+              )
+
+          print("=" * 70)
+          print("JPRO FULL SLATE AUDIT")
+          print("=" * 70)
 
           print(
               "STATUS:",
@@ -714,8 +1179,15 @@ jobs:
           )
 
           print(
-              "GAME:",
-              d["game"]
+              "SLATE:",
+              d["slate"]
+          )
+
+          print(
+              "GAMES:",
+              len(
+                  d["games"]
+              )
           )
 
           print(
@@ -732,44 +1204,83 @@ jobs:
               ]
           )
 
+          if (
+              not d["games"]
+          ):
+              raise RuntimeError(
+                  "No games in output."
+              )
+
+          if (
+              not d["projections"]
+          ):
+              raise RuntimeError(
+                  "No projections in output."
+              )
+
+          print("")
+          print("GAMES")
+          print("-" * 70)
+
+          for game in d["games"]:
+
+              print(
+                  game["game"]
+              )
+
           print("")
           print("DISTRIBUTION PREVIEW")
-          print("-" * 60)
+          print("-" * 70)
 
-          for x in d["projections"][:15]:
+          for x in d[
+              "projections"
+          ][:20]:
 
-              stored = len(
-                  x[
-                      "simulation_values"
-                  ]
+              histogram = x.get(
+                  "simulation_histogram",
+                  []
+              )
+
+              stored = sum(
+                  int(
+                      entry[1]
+                  )
+                  for entry
+                  in histogram
               )
 
               print(
                   x["player"],
+                  "|",
+                  x["team"],
+                  "|",
+                  x["game"],
                   "|",
                   x["prop"],
                   "| PROJ:",
                   x["projection"],
                   "| MEDIAN:",
                   x["median"],
-                  "| STORED SIMS:",
+                  "| REPRESENTED SIMS:",
                   stored
               )
 
-              if stored != 20000:
+              if (
+                  stored != SIMS
+              ):
                   raise RuntimeError(
-                      "Simulation count mismatch"
+                      "Compressed simulation count mismatch."
                   )
 
           print("")
           print(
-              "JPRO DISTRIBUTION AUDIT PASSED"
+              "JPRO FULL SLATE AUDIT PASSED"
           )
 
           PY
 
-      - name: Save JPro betting distributions
+      - name: Save JPro full slate
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "JPro: add 20K betting distributions"
+          commit_message: "JPro: build Week 3 full slate"
           file_pattern: data/jpro-current-projections.json
