@@ -1,2037 +1,2388 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover">
-<meta name="theme-color" content="#050505">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta charset="UTF-8" />
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-<title>JPro Model V2</title>
+  <meta name="theme-color" content="#050505" />
 
-<link rel="manifest" href="manifest.webmanifest">
+  <title>JPro Model V2</title>
 
-<style>
-* {
-  box-sizing: border-box;
-}
+  <link rel="manifest" href="manifest.webmanifest" />
 
-body {
-  margin: 0;
-  background: #050505;
-  color: #fff;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-}
+  <style>
+    :root {
+      --bg: #050505;
+      --card: #0d0d0d;
+      --card2: #111111;
+      --border: #252525;
+      --border2: #343434;
+      --text: #ffffff;
+      --muted: #8e8e93;
+      --soft: #b7b7bd;
+    }
 
-button,
-input {
-  font: inherit;
-}
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
 
-button {
-  color: inherit;
-}
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family:
+        -apple-system,
+        BlinkMacSystemFont,
+        "SF Pro Display",
+        "SF Pro Text",
+        Arial,
+        sans-serif;
+    }
 
-.app {
-  width: 100%;
-  max-width: 760px;
-  margin: auto;
-  padding:
-    calc(18px + env(safe-area-inset-top))
-    16px
-    calc(105px + env(safe-area-inset-bottom));
-}
+    body {
+      min-height: 100vh;
+      padding-bottom: calc(100px + env(safe-area-inset-bottom));
+    }
 
-.header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
+    button,
+    input {
+      font: inherit;
+    }
 
-.brand {
-  font-size: 34px;
-  font-weight: 950;
-  letter-spacing: -2px;
-}
+    button {
+      color: inherit;
+    }
 
-.subtitle {
-  margin-top: 2px;
-  color: #777;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 2px;
-}
+    .app {
+      width: 100%;
+      max-width: 760px;
+      margin: 0 auto;
+    }
 
-.badge {
-  border: 1px solid #333;
-  border-radius: 999px;
-  padding: 7px 9px;
-  font-size: 9px;
-  font-weight: 900;
-  color: #bbb;
-  letter-spacing: .7px;
-}
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      padding:
+        calc(12px + env(safe-area-inset-top))
+        18px
+        14px;
+      background: rgba(5, 5, 5, 0.96);
+      border-bottom: 1px solid #151515;
+      backdrop-filter: blur(18px);
+    }
 
-.hero {
-  margin-top: 28px;
-}
+    .topbar-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
 
-.eyebrow {
-  color: #777;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 1.4px;
-}
+    .brand {
+      font-size: 25px;
+      font-weight: 900;
+      letter-spacing: -1.2px;
+    }
 
-h1 {
-  font-size: 28px;
-  margin: 7px 0 5px;
-  letter-spacing: -1px;
-}
+    .engine-badge {
+      flex-shrink: 0;
+      border: 1px solid var(--border2);
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .8px;
+      color: #d7d7dc;
+      background: #0c0c0c;
+    }
 
-.hero p {
-  color: #888;
-  font-size: 12px;
-  line-height: 1.5;
-  margin: 0;
-}
+    .content {
+      padding: 20px 16px 10px;
+    }
 
-.section-title {
-  font-size: 19px;
-  font-weight: 950;
-  margin: 28px 0 12px;
-}
+    .eyebrow {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      font-size: 11px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
 
-.card {
-  background: #0d0d0d;
-  border: 1px solid #252525;
-  border-radius: 16px;
-  padding: 18px;
-  margin-bottom: 12px;
-}
+    .page-title {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.05;
+      letter-spacing: -1.4px;
+      font-weight: 900;
+    }
 
-.game-card {
-  cursor: pointer;
-}
+    .page-subtitle {
+      margin: 9px 0 22px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
 
-.game-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 15px;
-}
+    .section-title {
+      margin: 27px 0 12px;
+      font-size: 12px;
+      font-weight: 900;
+      letter-spacing: 1.2px;
+      color: #c5c5ca;
+      text-transform: uppercase;
+    }
 
-.game-name {
-  font-size: 23px;
-  font-weight: 950;
-}
+    .card {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--card);
+      margin-bottom: 11px;
+      overflow: hidden;
+    }
 
-.game-arrow {
-  font-size: 22px;
-  color: #777;
-}
+    .tap-card {
+      cursor: pointer;
+      transition: transform .12s ease, border-color .12s ease;
+    }
 
-.muted {
-  color: #777;
-  font-size: 11px;
-  margin-top: 6px;
-}
+    .tap-card:active {
+      transform: scale(.985);
+      border-color: #555;
+    }
 
-.player-row {
-  width: 100%;
-  border: 0;
-  text-align: left;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  background: #0d0d0d;
-  border: 1px solid #252525;
-  border-radius: 14px;
-  padding: 15px;
-  margin-bottom: 9px;
-}
+    .game-card {
+      padding: 17px;
+    }
 
-.player-name {
-  font-size: 16px;
-  font-weight: 900;
-}
+    .game-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
 
-.player-meta {
-  color: #777;
-  font-size: 10px;
-  font-weight: 800;
-  margin-top: 4px;
-}
+    .game-name {
+      font-size: 20px;
+      font-weight: 900;
+      letter-spacing: -.5px;
+    }
 
-.chevron {
-  color: #666;
-  font-size: 20px;
-}
+    .game-meta {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
 
-.back {
-  border: 0;
-  background: none;
-  padding: 6px 0;
-  margin-bottom: 18px;
-  color: #aaa;
-  font-size: 13px;
-  font-weight: 800;
-  cursor: pointer;
-}
+    .arrow {
+      font-size: 21px;
+      color: #777;
+      padding-top: 1px;
+    }
 
-.player-hero {
-  padding: 20px;
-  background: #0d0d0d;
-  border: 1px solid #252525;
-  border-radius: 16px;
-}
+    .player-card {
+      padding: 16px;
+    }
 
-.player-hero h2 {
-  margin: 0;
-  font-size: 27px;
-  letter-spacing: -.8px;
-}
+    .player-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
 
-.player-hero .meta {
-  color: #888;
-  font-size: 11px;
-  font-weight: 800;
-  margin-top: 5px;
-}
+    .player-name {
+      font-size: 17px;
+      font-weight: 850;
+      letter-spacing: -.25px;
+    }
 
-.analysis-label {
-  margin-top: 20px;
-  color: #777;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 1.2px;
-}
+    .player-meta {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 12px;
+    }
 
-.analysis-copy {
-  font-size: 13px;
-  line-height: 1.6;
-  color: #bbb;
-  margin-top: 7px;
-}
+    .prop-count {
+      color: #bdbdc2;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+    }
 
-.prop-card {
-  background: #0d0d0d;
-  border: 1px solid #252525;
-  border-radius: 16px;
-  padding: 17px;
-  margin-bottom: 12px;
-}
+    .back-button {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      border: 0;
+      background: transparent;
+      color: #c9c9ce;
+      padding: 0;
+      margin: 0 0 18px;
+      font-size: 14px;
+      font-weight: 750;
+      cursor: pointer;
+    }
 
-.prop-name {
-  font-size: 14px;
-  font-weight: 950;
-  text-transform: uppercase;
-}
+    .hero {
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 19px;
+      background:
+        linear-gradient(
+          180deg,
+          #121212 0%,
+          #0a0a0a 100%
+        );
+      margin-bottom: 13px;
+    }
 
-.metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-  margin-top: 13px;
-}
+    .hero-player {
+      font-size: 27px;
+      font-weight: 950;
+      letter-spacing: -1px;
+      line-height: 1.05;
+    }
 
-.metric {
-  background: #151515;
-  border-radius: 11px;
-  padding: 12px;
-}
+    .hero-meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
 
-.metric-label {
-  font-size: 8px;
-  color: #777;
-  font-weight: 900;
-  letter-spacing: 1px;
-}
+    .intel-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 17px;
+    }
 
-.metric-value {
-  font-size: 22px;
-  font-weight: 950;
-  margin-top: 4px;
-}
+    .intel-box {
+      border: 1px solid var(--border);
+      border-radius: 13px;
+      background: #090909;
+      padding: 13px;
+    }
 
-.range {
-  margin-top: 9px;
-  color: #777;
-  font-size: 10px;
-  line-height: 1.5;
-}
+    .intel-label {
+      font-size: 9px;
+      letter-spacing: 1.2px;
+      color: var(--muted);
+      font-weight: 900;
+      text-transform: uppercase;
+    }
 
-.calc-toggle {
-  width: 100%;
-  margin-top: 14px;
-  padding: 12px;
-  border-radius: 10px;
-  background: #151515;
-  border: 1px solid #292929;
-  font-size: 11px;
-  font-weight: 900;
-  cursor: pointer;
-}
+    .intel-value {
+      margin-top: 6px;
+      font-size: 18px;
+      font-weight: 900;
+    }
 
-.calculator {
-  display: none;
-  margin-top: 13px;
-  padding-top: 13px;
-  border-top: 1px solid #292929;
-}
+    .intel-small {
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.35;
+    }
 
-.calculator.open {
-  display: block;
-}
+    .analysis-card {
+      padding: 17px;
+    }
 
-.inputs {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-}
+    .analysis-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 11px;
+    }
 
-.field label {
-  display: block;
-  color: #777;
-  font-size: 8px;
-  font-weight: 900;
-  letter-spacing: 1px;
-  margin-bottom: 5px;
-}
+    .analysis-title {
+      font-size: 13px;
+      font-weight: 900;
+      letter-spacing: .5px;
+      text-transform: uppercase;
+    }
 
-.field input {
-  width: 100%;
-  min-height: 45px;
-  background: #050505;
-  color: #fff;
-  border: 1px solid #393939;
-  border-radius: 9px;
-  padding: 10px;
-  font-size: 16px;
-  font-weight: 850;
-  outline: none;
-}
+    .score-pill {
+      flex-shrink: 0;
+      border: 1px solid var(--border2);
+      border-radius: 999px;
+      padding: 6px 9px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .5px;
+    }
 
-.field input:focus {
-  border-color: #fff;
-}
+    .analysis-copy {
+      color: #d0d0d4;
+      font-size: 13px;
+      line-height: 1.55;
+    }
 
-.calc-results {
-  margin-top: 12px;
-}
+    .evidence {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 14px;
+    }
 
-.result-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 9px;
-}
+    .evidence-box {
+      padding: 11px 8px;
+      text-align: center;
+      border: 1px solid #222;
+      border-radius: 11px;
+      background: #090909;
+    }
 
-.result {
-  background: #151515;
-  border-radius: 10px;
-  padding: 12px;
-}
+    .evidence-value {
+      font-size: 15px;
+      font-weight: 900;
+    }
 
-.result-title {
-  color: #777;
-  font-size: 8px;
-  font-weight: 900;
-  letter-spacing: 1px;
-}
+    .evidence-label {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+    }
 
-.result-big {
-  font-size: 20px;
-  font-weight: 950;
-  margin-top: 4px;
-}
+    .prop-card {
+      padding: 17px;
+    }
 
-.result-small {
-  color: #888;
-  font-size: 9px;
-  margin-top: 4px;
-}
+    .prop-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
 
-.edge {
-  margin-top: 9px;
-  padding: 12px;
-  background: #151515;
-  border-radius: 10px;
-  font-size: 11px;
-  line-height: 1.5;
-  color: #aaa;
-}
+    .prop-name {
+      font-size: 16px;
+      font-weight: 900;
+    }
 
-.placeholder {
-  padding: 22px;
-  background: #0d0d0d;
-  border: 1px solid #252525;
-  border-radius: 16px;
-}
+    .prop-projection {
+      text-align: right;
+    }
 
-.placeholder strong {
-  font-size: 17px;
-}
+    .projection-number {
+      font-size: 22px;
+      font-weight: 950;
+    }
 
-.placeholder p {
-  color: #888;
-  font-size: 12px;
-  line-height: 1.55;
-  margin-bottom: 0;
-}
+    .projection-label {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 9px;
+      letter-spacing: .7px;
+      text-transform: uppercase;
+    }
 
-.status {
-  padding: 18px;
-  background: #0d0d0d;
-  border: 1px solid #252525;
-  border-radius: 14px;
-  color: #999;
-  font-size: 12px;
-}
+    .range-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+      margin-top: 15px;
+    }
 
-.hidden {
-  display: none !important;
-}
+    .range-box {
+      border: 1px solid #222;
+      border-radius: 9px;
+      background: #090909;
+      padding: 9px 4px;
+      text-align: center;
+    }
 
-.bottom-nav {
-  position: fixed;
-  z-index: 50;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(5,5,5,.97);
-  border-top: 1px solid #222;
-  padding:
-    10px 10px
-    calc(10px + env(safe-area-inset-bottom));
-  backdrop-filter: blur(15px);
-}
+    .range-value {
+      font-size: 12px;
+      font-weight: 850;
+    }
 
-.nav-inner {
-  max-width: 760px;
-  margin: auto;
-  display: grid;
-  grid-template-columns: repeat(3,1fr);
-}
+    .range-label {
+      color: var(--muted);
+      font-size: 8px;
+      margin-top: 3px;
+    }
 
-.nav-btn {
-  border: 0;
-  background: none;
-  padding: 10px 4px;
-  color: #666;
-  font-size: 9px;
-  font-weight: 950;
-  letter-spacing: .7px;
-  cursor: pointer;
-}
+    .prop-context {
+      margin-top: 13px;
+      padding-top: 13px;
+      border-top: 1px solid #202020;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
 
-.nav-btn.active {
-  color: #fff;
-}
+    .mini-pill {
+      border: 1px solid #292929;
+      border-radius: 999px;
+      padding: 6px 8px;
+      color: #c4c4c8;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: .35px;
+    }
 
-@media(max-width:360px) {
-  .inputs,
-  .result-grid {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
+    .calculator-toggle {
+      width: 100%;
+      margin-top: 14px;
+      border: 1px solid #2c2c2c;
+      border-radius: 11px;
+      background: #111;
+      color: #fff;
+      padding: 11px;
+      font-size: 10px;
+      font-weight: 900;
+      letter-spacing: .7px;
+      cursor: pointer;
+    }
+
+    .calculator {
+      display: none;
+      margin-top: 11px;
+      padding-top: 13px;
+      border-top: 1px solid #202020;
+    }
+
+    .calculator.open {
+      display: block;
+    }
+
+    .input-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 9px;
+    }
+
+    .input-wrap label {
+      display: block;
+      color: var(--muted);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      margin-bottom: 6px;
+      font-weight: 800;
+    }
+
+    .input-wrap input {
+      width: 100%;
+      border: 1px solid #303030;
+      border-radius: 10px;
+      background: #080808;
+      color: #fff;
+      padding: 11px;
+      outline: none;
+    }
+
+    .calc-button {
+      width: 100%;
+      margin-top: 9px;
+      border: 0;
+      border-radius: 10px;
+      background: #fff;
+      color: #000;
+      padding: 12px;
+      font-size: 11px;
+      font-weight: 950;
+      cursor: pointer;
+    }
+
+    .calc-result {
+      margin-top: 11px;
+      border: 1px solid #242424;
+      border-radius: 11px;
+      padding: 12px;
+      display: none;
+      font-size: 12px;
+      line-height: 1.55;
+      color: #d2d2d6;
+    }
+
+    .calc-result.show {
+      display: block;
+    }
+
+    .risk-list {
+      margin: 0;
+      padding-left: 18px;
+      color: #c8c8cd;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .risk-list li {
+      margin-bottom: 7px;
+    }
+
+    .empty {
+      padding: 24px 18px;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .loading {
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .bottom-nav {
+      position: fixed;
+      z-index: 40;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 100%;
+      max-width: 760px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: rgba(8, 8, 8, .97);
+      border-top: 1px solid #202020;
+      padding:
+        8px
+        8px
+        calc(8px + env(safe-area-inset-bottom));
+      backdrop-filter: blur(18px);
+    }
+
+    .nav-button {
+      border: 0;
+      background: transparent;
+      color: #666;
+      padding: 9px 5px;
+      font-size: 9px;
+      letter-spacing: .7px;
+      font-weight: 900;
+      cursor: pointer;
+    }
+
+    .nav-button.active {
+      color: #fff;
+    }
+
+    .nav-icon {
+      display: block;
+      font-size: 17px;
+      margin-bottom: 4px;
+    }
+
+    @media (max-width: 420px) {
+      .page-title {
+        font-size: 28px;
+      }
+
+      .hero-player {
+        font-size: 25px;
+      }
+    }
+  </style>
 </head>
 
 <body>
 
-<main class="app">
+  <div class="app">
 
-<header class="header">
-  <div>
-    <div class="brand">JPRO</div>
-    <div class="subtitle">THE JPRO MODEL V2</div>
-  </div>
+    <header class="topbar">
+      <div class="topbar-row">
+        <div class="brand">JPRO</div>
+        <div class="engine-badge" id="engineBadge">
+          20K ENGINE
+        </div>
+      </div>
+    </header>
 
-  <div class="badge">
-    20K ENGINE
-  </div>
-</header>
-
-<section id="gamesScreen">
-
-  <div class="hero">
-    <div class="eyebrow">
-      NFL ANALYSIS
-    </div>
-
-    <h1>Games</h1>
-
-    <p>
-      Select a matchup to open JPro's player analysis.
-    </p>
-  </div>
-
-  <div class="section-title">
-    Current Slate
-  </div>
-
-  <div id="gamesList">
-    <div class="status">
-      Loading JPro...
-    </div>
-  </div>
-
-</section>
-
-<section
-  id="gameScreen"
-  class="hidden"
->
-
-  <button
-    class="back"
-    id="gameBack"
-  >
-    ← Games
-  </button>
-
-  <div class="eyebrow">
-    GAME ANALYSIS
-  </div>
-
-  <h1 id="gameTitle">
-    Game
-  </h1>
-
-  <p class="muted">
-    Select a player for full JPro analysis.
-  </p>
-
-  <div class="section-title">
-    Players
-  </div>
-
-  <div id="playerList"></div>
-
-</section>
-
-<section
-  id="playerScreen"
-  class="hidden"
->
-
-  <button
-    class="back"
-    id="playerBack"
-  >
-    ← Game
-  </button>
-
-  <div class="player-hero">
-
-    <h2 id="playerTitle">
-      Player
-    </h2>
-
-    <div
-      class="meta"
-      id="playerMeta"
-    ></div>
-
-    <div class="analysis-label">
-      JPRO PLAYER ANALYSIS
-    </div>
-
-    <div
-      class="analysis-copy"
-      id="playerCopy"
-    >
-      Current projections are generated from
-      JPro's historical model and 20,000-outcome
-      simulation distribution. Matchup, role and
-      defensive intelligence will populate here
-      as the next data layer is connected.
-    </div>
+    <main class="content" id="content">
+      <div class="loading">
+        Loading JPro…
+      </div>
+    </main>
 
   </div>
 
-  <div class="section-title">
-    Projections
-  </div>
-
-  <div id="playerProps"></div>
-
-</section>
-
-<section
-  id="matchupsScreen"
-  class="hidden"
->
-
-  <div class="hero">
-
-    <div class="eyebrow">
-      WEEKLY INTELLIGENCE
-    </div>
-
-    <h1>Matchups</h1>
-
-    <p>
-      JPro's strongest player situations
-      across the entire slate.
-    </p>
-
-  </div>
-
-  <div class="section-title">
-    Top Matchups
-  </div>
-
-  <div class="placeholder">
-
-    <strong>
-      Matchup Engine Next
-    </strong>
-
-    <p>
-      This page will identify notable player
-      situations using opponent defense,
-      expected role, usage, game environment
-      and JPro's simulations. TD matchups will
-      also live here.
-    </p>
-
-  </div>
-
-</section>
-
-<section
-  id="picksScreen"
-  class="hidden"
->
-
-  <div class="hero">
-
-    <div class="eyebrow">
-      MODEL FILTER
-    </div>
-
-    <h1>JPro Picks</h1>
-
-    <p>
-      Props appear here when JPro's evidence
-      meets the required criteria.
-    </p>
-
-  </div>
-
-  <div class="section-title">
-    Qualified Plays
-  </div>
-
-  <div class="placeholder">
-
-    <strong>
-      No forced picks.
-    </strong>
-
-    <p>
-      The finished engine will combine the
-      simulation distribution, matchup quality,
-      expected role and evaluated sportsbook
-      line before promoting a prop here.
-    </p>
-
-  </div>
-
-</section>
-
-</main>
-
-<nav class="bottom-nav">
-
-  <div class="nav-inner">
+  <nav class="bottom-nav">
 
     <button
-      class="nav-btn active"
-      data-screen="games"
+      class="nav-button active"
+      id="navGames"
+      onclick="showGames()"
     >
+      <span class="nav-icon">◫</span>
       GAMES
     </button>
 
     <button
-      class="nav-btn"
-      data-screen="matchups"
+      class="nav-button"
+      id="navMatchups"
+      onclick="showMatchups()"
     >
+      <span class="nav-icon">◎</span>
       MATCHUPS
     </button>
 
     <button
-      class="nav-btn"
-      data-screen="picks"
+      class="nav-button"
+      id="navPicks"
+      onclick="showPicks()"
     >
+      <span class="nav-icon">◆</span>
       JPRO PICKS
     </button>
 
-  </div>
+  </nav>
 
-</nav>
+  <script>
 
-<script>
+    let jproData = null;
+    let currentGame = null;
+    let currentPlayerId = null;
 
-const DATA_URL =
-  "data/jpro-current-projections.json?v=" +
-  Date.now();
+    const content =
+      document.getElementById("content");
 
-const screens = {
-  games:
-    document.getElementById("gamesScreen"),
-
-  game:
-    document.getElementById("gameScreen"),
-
-  player:
-    document.getElementById("playerScreen"),
-
-  matchups:
-    document.getElementById("matchupsScreen"),
-
-  picks:
-    document.getElementById("picksScreen")
-};
-
-const propNames = {
-  passing_yards:
-    "Passing Yards",
-
-  rushing_yards:
-    "Rushing Yards",
-
-  receiving_yards:
-    "Receiving Yards",
-
-  receptions:
-    "Receptions",
-
-  anytime_td:
-    "Anytime TD",
-
-  two_plus_td:
-    "2+ Touchdowns",
-
-  three_plus_td:
-    "3+ Touchdowns"
-};
-
-let jproData = null;
-
-let players = [];
-
-let currentPlayer = null;
-
-let currentGame = null;
-
-function showScreen(name) {
-
-  Object.values(
-    screens
-  ).forEach(
-    screen =>
-      screen.classList.add(
-        "hidden"
-      )
-  );
-
-  screens[
-    name
-  ].classList.remove(
-    "hidden"
-  );
-
-  document.querySelectorAll(
-    ".nav-btn"
-  ).forEach(btn => {
-
-    btn.classList.toggle(
-      "active",
-
-      btn.dataset.screen === name ||
-
-      (
-        name === "game" &&
-        btn.dataset.screen === "games"
-      ) ||
-
-      (
-        name === "player" &&
-        btn.dataset.screen === "games"
-      )
-    );
-
-  });
-
-  window.scrollTo(
-    0,
-    0
-  );
-}
-
-function escapeHtml(value) {
-
-  return String(
-    value ?? ""
-  )
-  .replaceAll(
-    "&",
-    "&amp;"
-  )
-  .replaceAll(
-    "<",
-    "&lt;"
-  )
-  .replaceAll(
-    ">",
-    "&gt;"
-  )
-  .replaceAll(
-    '"',
-    "&quot;"
-  )
-  .replaceAll(
-    "'",
-    "&#039;"
-  );
-}
-
-function groupPlayers(
-  projections
-) {
-
-  const map =
-    new Map();
-
-  projections.forEach(
-    prop => {
-
-      const key =
-        prop.player_id ||
-        prop.player;
-
-      if (
-        !map.has(key)
-      ) {
-
-        map.set(
-          key,
-          {
-            id: key,
-            name:
-              prop.player,
-            team:
-              prop.team,
-            position:
-              prop.position,
-            game:
-              prop.game ||
-              jproData.game ||
-              "Current Game",
-            props: []
-          }
-        );
-      }
-
-      map.get(
-        key
-      ).props.push(
-        prop
-      );
-
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
     }
-  );
 
-  return [
-    ...map.values()
-  ].sort(
-    (a,b) => {
+    function prettyProp(prop) {
 
-      const teamCompare =
-        String(
-          a.team
-        ).localeCompare(
-          String(
-            b.team
-          )
-        );
+      const labels = {
+        passing_yards: "Passing Yards",
+        rushing_yards: "Rushing Yards",
+        receiving_yards: "Receiving Yards",
+        receptions: "Receptions"
+      };
 
-      if (
-        teamCompare !== 0
-      ) {
-        return teamCompare;
+      return labels[prop] || prop;
+    }
+
+    function setActiveNav(id) {
+
+      document
+        .querySelectorAll(".nav-button")
+        .forEach(button => {
+          button.classList.remove("active");
+        });
+
+      const el =
+        document.getElementById(id);
+
+      if (el) {
+        el.classList.add("active");
       }
+    }
 
-      return String(
-        a.name
-      ).localeCompare(
-        String(
-          b.name
-        )
+    function gameProjections(gameName) {
+
+      return (
+        jproData?.projections || []
+      ).filter(
+        x => x.game === gameName
       );
     }
-  );
-}
 
-function getGames() {
+    function playerProjections(
+      gameName,
+      playerId
+    ) {
 
-  if (
-    Array.isArray(
-      jproData.games
-    ) &&
-    jproData.games.length
-  ) {
+      return gameProjections(
+        gameName
+      ).filter(
+        x =>
+          String(x.player_id) ===
+          String(playerId)
+      );
+    }
 
-    return jproData.games.map(
-      game => {
+    function uniquePlayers(gameName) {
 
-        if (
-          typeof game === "string"
-        ) {
+      const map = new Map();
 
-          return {
-            game: game
-          };
+      gameProjections(
+        gameName
+      ).forEach(x => {
+
+        const key =
+          String(x.player_id);
+
+        if (!map.has(key)) {
+
+          map.set(
+            key,
+            {
+              player_id:
+                x.player_id,
+
+              player:
+                x.player,
+
+              team:
+                x.team,
+
+              opponent:
+                x.opponent,
+
+              position:
+                x.position,
+
+              game:
+                x.game,
+
+              props:
+                []
+            }
+          );
         }
 
-        return game;
-      }
-    );
-  }
-
-  return [
-    {
-      game:
-        jproData.game ||
-        "Current Game"
-    }
-  ];
-}
-
-function playersForGame(
-  gameName
-) {
-
-  return players.filter(
-    player => {
-
-      if (
-        player.game ===
-        gameName
-      ) {
-        return true;
-      }
-
-      const game =
-        getGames().find(
-          g =>
-            (
-              g.game ||
-              g.name
-            ) === gameName
+        map.get(
+          key
+        ).props.push(
+          x
         );
+      });
 
-      if (!game) {
-        return false;
-      }
-
-      const teams = [
-        game.away_team,
-        game.home_team
-      ].filter(Boolean);
-
-      return teams.includes(
-        player.team
+      return Array.from(
+        map.values()
+      ).sort(
+        (a, b) =>
+          a.team.localeCompare(
+            b.team
+          )
+          ||
+          a.player.localeCompare(
+            b.player
+          )
       );
     }
-  );
-}
 
-function fairAmerican(
-  probability
-) {
+    function showGames() {
 
-  if (
-    !Number.isFinite(
-      probability
-    ) ||
-    probability <= 0 ||
-    probability >= 1
-  ) {
+      currentGame = null;
+      currentPlayerId = null;
 
-    return "N/A";
-  }
-
-  let odds;
-
-  if (
-    probability >= .5
-  ) {
-
-    odds =
-      -100 *
-      probability /
-      (
-        1 -
-        probability
+      setActiveNav(
+        "navGames"
       );
 
-  } else {
+      const games =
+        jproData?.games || [];
 
-    odds =
-      100 *
-      (
-        1 -
-        probability
-      ) /
-      probability;
-  }
+      content.innerHTML = `
+        <div class="eyebrow">
+          ${escapeHtml(
+            jproData?.slate ||
+            "Current Slate"
+          )}
+        </div>
 
-  odds =
-    Math.round(
-      odds
-    );
+        <h1 class="page-title">
+          Games
+        </h1>
 
-  return odds > 0
-    ? "+" + odds
-    : String(
-        odds
+        <div class="page-subtitle">
+          Select a matchup to open the JPro player board.
+        </div>
+
+        ${
+          games.length
+          ?
+          games.map(game => {
+
+            const projections =
+              gameProjections(
+                game.game
+              );
+
+            const players =
+              new Set(
+                projections.map(
+                  x => x.player_id
+                )
+              ).size;
+
+            return `
+              <div
+                class="card game-card tap-card"
+                onclick='showGame(
+                  ${JSON.stringify(
+                    game.game
+                  )}
+                )'
+              >
+                <div class="game-top">
+
+                  <div>
+
+                    <div class="game-name">
+                      ${escapeHtml(
+                        game.game
+                      )}
+                    </div>
+
+                    <div class="game-meta">
+                      ${players} modeled players
+                      ·
+                      ${projections.length} props
+                    </div>
+
+                  </div>
+
+                  <div class="arrow">
+                    ›
+                  </div>
+
+                </div>
+              </div>
+            `;
+          }).join("")
+          :
+          `
+            <div class="empty">
+              No games were found in the current JPro slate.
+            </div>
+          `
+        }
+      `;
+    }
+
+    function showGame(gameName) {
+
+      currentGame =
+        gameName;
+
+      currentPlayerId =
+        null;
+
+      setActiveNav(
+        "navGames"
       );
-}
 
-function impliedProbability(
-  american
-) {
-
-  const odds =
-    Number(
-      american
-    );
-
-  if (
-    !Number.isFinite(
-      odds
-    ) ||
-    odds === 0
-  ) {
-
-    return null;
-  }
-
-  if (
-    odds > 0
-  ) {
-
-    return (
-      100 /
-      (
-        odds +
-        100
-      )
-    );
-  }
-
-  return (
-    Math.abs(
-      odds
-    ) /
-    (
-      Math.abs(
-        odds
-      ) +
-      100
-    )
-  );
-}
-
-function pct(p) {
-
-  return (
-    p *
-    100
-  ).toFixed(
-    1
-  ) + "%";
-}
-
-function defaultLine(
-  prop
-) {
-
-  const median =
-    Number(
-      prop.median
-    );
-
-  if (
-    !Number.isFinite(
-      median
-    )
-  ) {
-
-    return "";
-  }
-
-  return (
-    Math.floor(
-      median
-    ) +
-    .5
-  ).toFixed(
-    1
-  );
-}
-
-function renderHome() {
-
-  const list =
-    document.getElementById(
-      "gamesList"
-    );
-
-  const games =
-    getGames();
-
-  list.innerHTML =
-    "";
-
-  games.forEach(
-    gameData => {
-
-      const gameName =
-        gameData.game ||
-        gameData.name ||
-        `${
-          gameData.away_team ||
-          "AWAY"
-        } @ ${
-          gameData.home_team ||
-          "HOME"
-        }`;
-
-      const gamePlayers =
-        playersForGame(
+      const players =
+        uniquePlayers(
           gameName
         );
 
-      const card =
-        document.createElement(
-          "div"
-        );
+      content.innerHTML = `
+        <button
+          class="back-button"
+          onclick="showGames()"
+        >
+          ‹ Back to Games
+        </button>
 
-      card.className =
-        "card game-card";
+        <div class="eyebrow">
+          Player Board
+        </div>
 
-      let details =
-        `${gamePlayers.length} modeled players`;
+        <h1 class="page-title">
+          ${escapeHtml(
+            gameName
+          )}
+        </h1>
 
-      if (
-        gameData.gameday
-      ) {
+        <div class="page-subtitle">
+          Select a player for full JPro analysis.
+        </div>
 
-        details =
-          `${gameData.gameday} • ${details}`;
+        ${
+          players.length
+          ?
+          players.map(player => {
+
+            const role =
+              player.props[0]?.role || {};
+
+            return `
+              <div
+                class="card player-card tap-card"
+                onclick='showPlayer(
+                  ${JSON.stringify(
+                    gameName
+                  )},
+                  ${JSON.stringify(
+                    String(
+                      player.player_id
+                    )
+                  )}
+                )'
+              >
+
+                <div class="player-row">
+
+                  <div>
+
+                    <div class="player-name">
+                      ${escapeHtml(
+                        player.player
+                      )}
+                    </div>
+
+                    <div class="player-meta">
+                      ${escapeHtml(
+                        player.team
+                      )}
+                      ·
+                      ${escapeHtml(
+                        player.position
+                      )}
+                      ·
+                      vs
+                      ${escapeHtml(
+                        player.opponent
+                      )}
+                    </div>
+
+                  </div>
+
+                  <div class="prop-count">
+                    ${player.props.length}
+                    PROPS
+                    ›
+                  </div>
+
+                </div>
+
+                ${
+                  role.role_label
+                  ?
+                  `
+                    <div
+                      class="prop-context"
+                      style="margin-top:12px;
+                             padding-top:12px;"
+                    >
+                      <span class="mini-pill">
+                        ROLE ${escapeHtml(
+                          role.role_label
+                        )}
+                        ${Number(
+                          role.role_score || 0
+                        ).toFixed(1)}
+                      </span>
+                    </div>
+                  `
+                  :
+                  ""
+                }
+
+              </div>
+            `;
+          }).join("")
+          :
+          `
+            <div class="empty">
+              No modeled players found for this game.
+            </div>
+          `
+        }
+      `;
+    }
+
+    function roleDescription(
+      player,
+      role
+    ) {
+
+      const label =
+        role.role_label ||
+        "UNKNOWN";
+
+      const score =
+        Number(
+          role.role_score || 0
+        ).toFixed(1);
+
+      const position =
+        player.position;
+
+      if (position === "QB") {
+
+        const pass =
+          Number(
+            role.passing_yards_recent_avg || 0
+          ).toFixed(1);
+
+        const rush =
+          Number(
+            role.rushing_yards_recent_avg || 0
+          ).toFixed(1);
+
+        return `
+          JPro grades
+          ${escapeHtml(player.player)}
+          as a
+          <strong>${escapeHtml(label)}</strong>
+          role (${score}/100).
+          His recent pregame sample has produced
+          ${pass} passing yards and
+          ${rush} rushing yards per game.
+        `;
       }
 
-      card.innerHTML = `
-        <div class="game-row">
+      if (position === "RB") {
 
-          <div>
+        const rush =
+          Number(
+            role.rushing_yards_recent_avg || 0
+          ).toFixed(1);
 
-            <div class="eyebrow">
-              NFL MATCHUP
-            </div>
+        const rec =
+          Number(
+            role.receiving_yards_recent_avg || 0
+          ).toFixed(1);
 
-            <div class="game-name">
-              ${escapeHtml(gameName)}
-            </div>
+        const catches =
+          Number(
+            role.receptions_recent_avg || 0
+          ).toFixed(1);
 
-            <div class="muted">
-              ${escapeHtml(details)}
-            </div>
+        return `
+          JPro grades
+          ${escapeHtml(player.player)}
+          as a
+          <strong>${escapeHtml(label)}</strong>
+          role (${score}/100).
+          His recent pregame production averages
+          ${rush} rushing yards,
+          ${rec} receiving yards and
+          ${catches} receptions per game.
+        `;
+      }
 
-          </div>
+      const rec =
+        Number(
+          role.receiving_yards_recent_avg || 0
+        ).toFixed(1);
 
-          <div class="game-arrow">
-            ›
-          </div>
+      const catches =
+        Number(
+          role.receptions_recent_avg || 0
+        ).toFixed(1);
 
-        </div>
+      return `
+        JPro grades
+        ${escapeHtml(player.player)}
+        as a
+        <strong>${escapeHtml(label)}</strong>
+        role (${score}/100).
+        His recent pregame production averages
+        ${rec} receiving yards and
+        ${catches} receptions per game.
       `;
-
-      card.addEventListener(
-        "click",
-        () =>
-          renderGame(
-            gameName
-          )
-      );
-
-      list.appendChild(
-        card
-      );
     }
-  );
-}
 
-function renderGame(
-  gameName
-) {
+    function matchupDescription(
+      player,
+      prop
+    ) {
 
-  currentGame =
-    gameName ||
-    currentGame ||
-    jproData.game ||
-    "Current Game";
+      const matchup =
+        prop.matchup || {};
 
-  document.getElementById(
-    "gameTitle"
-  ).textContent =
-    currentGame;
+      const label =
+        matchup.matchup_label ||
+        "UNKNOWN";
 
-  const list =
-    document.getElementById(
-      "playerList"
-    );
+      const score =
+        Number(
+          matchup.matchup_score || 0
+        ).toFixed(1);
 
-  list.innerHTML =
-    "";
+      const allowed =
+        Number(
+          matchup.allowed_per_game || 0
+        ).toFixed(1);
 
-  const gamePlayers =
-    playersForGame(
-      currentGame
-    );
+      const league =
+        Number(
+          matchup.league_per_game || 0
+        ).toFixed(1);
 
-  if (
-    !gamePlayers.length
-  ) {
-
-    list.innerHTML = `
-      <div class="status">
-        No modeled players are available
-        for this matchup yet.
-      </div>
-    `;
-
-    showScreen(
-      "game"
-    );
-
-    return;
-  }
-
-  gamePlayers.forEach(
-    player => {
-
-      const btn =
-        document.createElement(
-          "button"
+      const games =
+        Number(
+          matchup.current_season_games || 0
         );
 
-      btn.className =
-        "player-row";
+      let direction =
+        "roughly in line with";
 
-      btn.innerHTML = `
-        <div>
+      if (
+        Number(
+          matchup.allowed_vs_league_ratio || 1
+        ) > 1.05
+      ) {
+        direction =
+          "above";
+      }
 
-          <div class="player-name">
-            ${escapeHtml(player.name)}
-          </div>
+      if (
+        Number(
+          matchup.allowed_vs_league_ratio || 1
+        ) < .95
+      ) {
+        direction =
+          "below";
+      }
 
-          <div class="player-meta">
-            ${escapeHtml(player.team)}
-            •
-            ${escapeHtml(player.position)}
-            •
-            ${player.props.length} PROPS
-          </div>
-
-        </div>
-
-        <div class="chevron">
-          ›
-        </div>
+      return `
+        ${escapeHtml(
+          player.opponent
+        )}'s blended defensive profile is
+        <strong>${escapeHtml(label)}</strong>
+        for ${escapeHtml(
+          prettyProp(
+            prop.prop
+          ).toLowerCase()
+        )} (${score}/100).
+        The defense has allowed
+        ${allowed} per game in this modeled category,
+        ${direction} the ${league} league baseline.
+        Current-season information is based on
+        ${games} game${games === 1 ? "" : "s"}
+        and is shrunk toward historical data.
       `;
-
-      btn.addEventListener(
-        "click",
-        () =>
-          renderPlayer(
-            player
-          )
-      );
-
-      list.appendChild(
-        btn
-      );
     }
-  );
 
-  showScreen(
-    "game"
-  );
-}
+    function getPrimaryProp(props) {
 
-function renderPlayer(
-  player
-) {
+      if (!props.length) {
+        return null;
+      }
 
-  currentPlayer =
-    player;
+      const preferred = [
+        "passing_yards",
+        "rushing_yards",
+        "receiving_yards",
+        "receptions"
+      ];
 
-  document.getElementById(
-    "playerTitle"
-  ).textContent =
-    player.name;
+      let best = null;
+      let bestScore = -Infinity;
 
-  document.getElementById(
-    "playerMeta"
-  ).textContent =
-    `${player.team} • ${player.position}`;
+      props.forEach(prop => {
 
-  const wrap =
-    document.getElementById(
-      "playerProps"
-    );
+        const role =
+          Number(
+            prop.role?.role_score || 0
+          );
 
-  wrap.innerHTML =
-    "";
+        const matchup =
+          Number(
+            prop.matchup?.matchup_score || 50
+          );
 
-  player.props.forEach(
-    (prop,index) => {
+        const preference =
+          preferred.indexOf(
+            prop.prop
+          );
 
-      const id =
-        `p-${index}`;
+        const prefBonus =
+          preference >= 0
+          ? (4 - preference)
+          : 0;
 
-      const card =
-        document.createElement(
-          "div"
+        const score =
+          role * .55 +
+          matchup * .45 +
+          prefBonus;
+
+        if (score > bestScore) {
+          bestScore = score;
+          best = prop;
+        }
+      });
+
+      return best;
+    }
+
+    function riskFactors(
+      player,
+      primaryProp
+    ) {
+
+      const risks = [];
+
+      const role =
+        primaryProp?.role || {};
+
+      const matchup =
+        primaryProp?.matchup || {};
+
+      const games =
+        Number(
+          role.games_sample || 0
         );
 
-      card.className =
-        "prop-card";
+      if (games <= 2) {
+
+        risks.push(
+          "The 2026 role sample is still small, so early-season usage can move quickly."
+        );
+      }
+
+      const matchupGames =
+        Number(
+          matchup.current_season_games || 0
+        );
+
+      if (matchupGames <= 2) {
+
+        risks.push(
+          "Opponent matchup data includes only two current-season games and therefore uses historical shrinkage."
+        );
+      }
 
       const p10 =
         Number(
-          prop.p10
-        );
-
-      const p25 =
-        Number(
-          prop.p25
-        );
-
-      const p75 =
-        Number(
-          prop.p75
+          primaryProp?.p10 || 0
         );
 
       const p90 =
         Number(
-          prop.p90
+          primaryProp?.p90 || 0
         );
 
-      card.innerHTML = `
-        <div class="prop-name">
-          ${
-            escapeHtml(
-              propNames[
-                prop.prop
-              ] ||
-              prop.prop
-            )
-          }
-        </div>
+      if (
+        primaryProp &&
+        p90 - p10 > 0
+      ) {
 
-        <div class="metrics">
+        risks.push(
+          `The 20K simulation range is wide: the 10th–90th percentile runs from ${p10} to ${p90} ${prettyProp(primaryProp.prop).toLowerCase()}.`
+        );
+      }
 
-          <div class="metric">
+      risks.push(
+        "Injuries, inactive decisions, game script and unexpected role changes can materially change a pregame projection."
+      );
 
-            <div class="metric-label">
-              JPRO PROJECTION
-            </div>
+      return risks;
+    }
 
-            <div class="metric-value">
-              ${
-                Number(
-                  prop.projection
-                ).toFixed(
-                  1
-                )
-              }
-            </div>
+    function showPlayer(
+      gameName,
+      playerId
+    ) {
 
+      currentGame =
+        gameName;
+
+      currentPlayerId =
+        playerId;
+
+      setActiveNav(
+        "navGames"
+      );
+
+      const props =
+        playerProjections(
+          gameName,
+          playerId
+        );
+
+      if (!props.length) {
+
+        content.innerHTML = `
+          <div class="empty">
+            Player analysis unavailable.
           </div>
+        `;
 
-          <div class="metric">
+        return;
+      }
 
-            <div class="metric-label">
-              20K MEDIAN
-            </div>
+      const player = {
+        player:
+          props[0].player,
 
-            <div class="metric-value">
-              ${
-                Number(
-                  prop.median
-                ).toFixed(
-                  1
-                )
-              }
-            </div>
+        team:
+          props[0].team,
 
-          </div>
+        opponent:
+          props[0].opponent,
 
-        </div>
+        position:
+          props[0].position
+      };
 
-        <div class="range">
-          20K RANGE
-          • P10 ${
-            Number.isFinite(
-              p10
-            )
-              ? p10.toFixed(1)
-              : "--"
-          }
-          · P25 ${
-            Number.isFinite(
-              p25
-            )
-              ? p25.toFixed(1)
-              : "--"
-          }
-          · P75 ${
-            Number.isFinite(
-              p75
-            )
-              ? p75.toFixed(1)
-              : "--"
-          }
-          · P90 ${
-            Number.isFinite(
-              p90
-            )
-              ? p90.toFixed(1)
-              : "--"
-          }
-        </div>
+      const role =
+        props[0].role || {};
 
+      const primary =
+        getPrimaryProp(
+          props
+        );
+
+      const primaryMatchup =
+        primary?.matchup || {};
+
+      const risks =
+        riskFactors(
+          player,
+          primary
+        );
+
+      content.innerHTML = `
         <button
-          class="calc-toggle"
-          id="toggle-${id}"
+          class="back-button"
+          onclick='showGame(
+            ${JSON.stringify(
+              gameName
+            )}
+          )'
         >
-          OPEN PROP CALCULATOR
+          ‹ Back to ${escapeHtml(
+            gameName
+          )}
         </button>
 
-        <div
-          class="calculator"
-          id="calc-${id}"
-        >
+        <div class="hero">
 
-          <div class="inputs">
+          <div class="eyebrow">
+            JPro Player Analysis
+          </div>
 
-            <div class="field">
+          <div class="hero-player">
+            ${escapeHtml(
+              player.player
+            )}
+          </div>
 
-              <label>
-                SPORTSBOOK LINE
-              </label>
+          <div class="hero-meta">
+            ${escapeHtml(
+              player.team
+            )}
+            ·
+            ${escapeHtml(
+              player.position
+            )}
+            ·
+            vs
+            ${escapeHtml(
+              player.opponent
+            )}
+          </div>
 
-              <input
-                id="line-${id}"
-                type="number"
-                step=".5"
-                inputmode="decimal"
-                value="${defaultLine(prop)}"
-              >
+          <div class="intel-grid">
+
+            <div class="intel-box">
+
+              <div class="intel-label">
+                Expected Role
+              </div>
+
+              <div class="intel-value">
+                ${escapeHtml(
+                  role.role_label ||
+                  "UNKNOWN"
+                )}
+              </div>
+
+              <div class="intel-small">
+                ${Number(
+                  role.role_score || 0
+                ).toFixed(1)}
+                / 100
+              </div>
 
             </div>
 
-            <div class="field">
+            <div class="intel-box">
 
-              <label>
-                AMERICAN ODDS
-              </label>
+              <div class="intel-label">
+                Primary Matchup
+              </div>
 
-              <input
-                id="odds-${id}"
-                type="number"
-                step="1"
-                inputmode="numeric"
-                value="-110"
-              >
+              <div class="intel-value">
+                ${escapeHtml(
+                  primaryMatchup.matchup_label ||
+                  "UNKNOWN"
+                )}
+              </div>
+
+              <div class="intel-small">
+                ${Number(
+                  primaryMatchup.matchup_score || 0
+                ).toFixed(1)}
+                / 100
+              </div>
 
             </div>
 
           </div>
 
-          <div class="calc-results">
+        </div>
 
-            <div class="result-grid">
+        <div class="card analysis-card">
 
-              <div class="result">
+          <div class="analysis-header">
 
-                <div class="result-title">
-                  OVER HIT RATE
+            <div class="analysis-title">
+              Expected Role
+            </div>
+
+            <div class="score-pill">
+              ${escapeHtml(
+                role.role_label ||
+                "UNKNOWN"
+              )}
+              ·
+              ${Number(
+                role.role_score || 0
+              ).toFixed(1)}
+            </div>
+
+          </div>
+
+          <div class="analysis-copy">
+            ${roleDescription(
+              player,
+              role
+            )}
+          </div>
+
+          <div class="evidence">
+
+            <div class="evidence-box">
+
+              <div class="evidence-value">
+                ${Number(
+                  role.games_sample || 0
+                )}
+              </div>
+
+              <div class="evidence-label">
+                Games
+              </div>
+
+            </div>
+
+            <div class="evidence-box">
+
+              <div class="evidence-value">
+                ${Number(
+                  role.receptions_recent_avg || 0
+                ).toFixed(1)}
+              </div>
+
+              <div class="evidence-label">
+                Rec Avg
+              </div>
+
+            </div>
+
+            <div class="evidence-box">
+
+              <div class="evidence-value">
+                ${Number(
+                  role.rushing_yards_recent_avg || 0
+                ).toFixed(1)}
+              </div>
+
+              <div class="evidence-label">
+                Rush Avg
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+        ${
+          primary
+          ?
+          `
+            <div class="card analysis-card">
+
+              <div class="analysis-header">
+
+                <div class="analysis-title">
+                  Matchup Intelligence
                 </div>
 
-                <div
-                  class="result-big"
-                  id="over-${id}"
-                >
-                  --
+                <div class="score-pill">
+                  ${escapeHtml(
+                    primaryMatchup.matchup_label ||
+                    "UNKNOWN"
+                  )}
+                  ·
+                  ${Number(
+                    primaryMatchup.matchup_score || 0
+                  ).toFixed(1)}
                 </div>
-
-                <div
-                  class="result-small"
-                  id="overCount-${id}"
-                ></div>
 
               </div>
 
-              <div class="result">
-
-                <div class="result-title">
-                  UNDER HIT RATE
-                </div>
-
-                <div
-                  class="result-big"
-                  id="under-${id}"
-                >
-                  --
-                </div>
-
-                <div
-                  class="result-small"
-                  id="underCount-${id}"
-                ></div>
-
+              <div class="analysis-copy">
+                ${matchupDescription(
+                  player,
+                  primary
+                )}
               </div>
 
-              <div class="result">
+              <div class="evidence">
 
-                <div class="result-title">
-                  OVER FAIR ODDS
+                <div class="evidence-box">
+
+                  <div class="evidence-value">
+                    ${Number(
+                      primaryMatchup.allowed_per_game || 0
+                    ).toFixed(1)}
+                  </div>
+
+                  <div class="evidence-label">
+                    Allowed
+                  </div>
+
                 </div>
 
-                <div
-                  class="result-big"
-                  id="overFair-${id}"
-                >
-                  --
+                <div class="evidence-box">
+
+                  <div class="evidence-value">
+                    ${Number(
+                      primaryMatchup.league_per_game || 0
+                    ).toFixed(1)}
+                  </div>
+
+                  <div class="evidence-label">
+                    League
+                  </div>
+
                 </div>
 
-              </div>
+                <div class="evidence-box">
 
-              <div class="result">
+                  <div class="evidence-value">
+                    ${Number(
+                      primaryMatchup.current_season_games || 0
+                    )}
+                  </div>
 
-                <div class="result-title">
-                  UNDER FAIR ODDS
-                </div>
+                  <div class="evidence-label">
+                    2026 Games
+                  </div>
 
-                <div
-                  class="result-big"
-                  id="underFair-${id}"
-                >
-                  --
                 </div>
 
               </div>
 
             </div>
+          `
+          :
+          ""
+        }
+
+        <div class="section-title">
+          JPro Projections
+        </div>
+
+        ${props.map(
+          (prop, index) =>
+            renderPropCard(
+              prop,
+              index
+            )
+        ).join("")}
+
+        <div class="section-title">
+          Risk Factors
+        </div>
+
+        <div class="card analysis-card">
+
+          <ul class="risk-list">
+            ${risks.map(
+              risk =>
+                `<li>${escapeHtml(risk)}</li>`
+            ).join("")}
+          </ul>
+
+        </div>
+
+        <div class="section-title">
+          JPro Bet Analysis
+        </div>
+
+        <div class="card analysis-card">
+
+          <div class="analysis-copy">
+            JPro has a projection, empirical
+            20,000-simulation distribution,
+            player-role profile and opponent matchup
+            for this player.
+            A betting side is not selected here
+            without a sportsbook line to evaluate.
+            Open a prop calculator above and enter
+            the line and price you are actually seeing
+            to compare it with the model distribution.
+          </div>
+
+        </div>
+      `;
+    }
+
+    function renderPropCard(
+      prop,
+      index
+    ) {
+
+      const matchup =
+        prop.matchup || {};
+
+      return `
+        <div class="card prop-card">
+
+          <div class="prop-header">
+
+            <div>
+
+              <div class="prop-name">
+                ${escapeHtml(
+                  prettyProp(
+                    prop.prop
+                  )
+                )}
+              </div>
+
+              <div
+                class="player-meta"
+                style="margin-top:6px;"
+              >
+                20,000 simulated outcomes
+              </div>
+
+            </div>
+
+            <div class="prop-projection">
+
+              <div class="projection-number">
+                ${Number(
+                  prop.projection || 0
+                ).toFixed(1)}
+              </div>
+
+              <div class="projection-label">
+                Projection
+              </div>
+
+            </div>
+
+          </div>
+
+          <div class="range-grid">
+
+            <div class="range-box">
+              <div class="range-value">
+                ${Number(
+                  prop.p10 || 0
+                ).toFixed(0)}
+              </div>
+              <div class="range-label">
+                P10
+              </div>
+            </div>
+
+            <div class="range-box">
+              <div class="range-value">
+                ${Number(
+                  prop.p25 || 0
+                ).toFixed(0)}
+              </div>
+              <div class="range-label">
+                P25
+              </div>
+            </div>
+
+            <div class="range-box">
+              <div class="range-value">
+                ${Number(
+                  prop.median || 0
+                ).toFixed(0)}
+              </div>
+              <div class="range-label">
+                MED
+              </div>
+            </div>
+
+            <div class="range-box">
+              <div class="range-value">
+                ${Number(
+                  prop.p75 || 0
+                ).toFixed(0)}
+              </div>
+              <div class="range-label">
+                P75
+              </div>
+            </div>
+
+            <div class="range-box">
+              <div class="range-value">
+                ${Number(
+                  prop.p90 || 0
+                ).toFixed(0)}
+              </div>
+              <div class="range-label">
+                P90
+              </div>
+            </div>
+
+          </div>
+
+          <div class="prop-context">
+
+            <span class="mini-pill">
+              MATCHUP
+              ${escapeHtml(
+                matchup.matchup_label ||
+                "UNKNOWN"
+              )}
+              ${Number(
+                matchup.matchup_score || 0
+              ).toFixed(1)}
+            </span>
+
+            <span class="mini-pill">
+              MEDIAN
+              ${Number(
+                prop.median || 0
+              ).toFixed(1)}
+            </span>
+
+          </div>
+
+          <button
+            class="calculator-toggle"
+            onclick="toggleCalculator(
+              '${index}'
+            )"
+          >
+            OPEN PROP CALCULATOR
+          </button>
+
+          <div
+            class="calculator"
+            id="calculator-${index}"
+          >
+
+            <div class="input-grid">
+
+              <div class="input-wrap">
+
+                <label>
+                  Sportsbook Line
+                </label>
+
+                <input
+                  id="line-${index}"
+                  type="number"
+                  step="0.5"
+                  placeholder="69.5"
+                />
+
+              </div>
+
+              <div class="input-wrap">
+
+                <label>
+                  American Odds
+                </label>
+
+                <input
+                  id="odds-${index}"
+                  type="number"
+                  step="1"
+                  placeholder="-110"
+                />
+
+              </div>
+
+            </div>
+
+            <button
+              class="calc-button"
+              onclick="calculateProp(
+                '${index}',
+                '${escapeHtml(
+                  prop.player_id
+                )}',
+                '${escapeHtml(
+                  prop.prop
+                )}'
+              )"
+            >
+              RUN JPRO LINE CHECK
+            </button>
 
             <div
-              class="edge"
-              id="edge-${id}"
+              class="calc-result"
+              id="result-${index}"
             ></div>
 
           </div>
 
         </div>
       `;
+    }
 
-      wrap.appendChild(
-        card
+    function toggleCalculator(
+      index
+    ) {
+
+      const calculator =
+        document.getElementById(
+          `calculator-${index}`
+        );
+
+      if (!calculator) {
+        return;
+      }
+
+      calculator.classList.toggle(
+        "open"
       );
+    }
 
-      const toggle =
-        document.getElementById(
-          `toggle-${id}`
+    function histogramProbabilities(
+      histogram,
+      line
+    ) {
+
+      let over = 0;
+      let under = 0;
+      let push = 0;
+      let total = 0;
+
+      (
+        histogram || []
+      ).forEach(entry => {
+
+        const value =
+          Number(entry[0]);
+
+        const count =
+          Number(entry[1]);
+
+        total += count;
+
+        if (value > line) {
+          over += count;
+        }
+        else if (value < line) {
+          under += count;
+        }
+        else {
+          push += count;
+        }
+      });
+
+      if (!total) {
+
+        return {
+          over: 0,
+          under: 0,
+          push: 0
+        };
+      }
+
+      return {
+        over:
+          over / total,
+
+        under:
+          under / total,
+
+        push:
+          push / total
+      };
+    }
+
+    function impliedProbability(
+      americanOdds
+    ) {
+
+      const odds =
+        Number(
+          americanOdds
         );
 
-      const calc =
-        document.getElementById(
-          `calc-${id}`
+      if (!Number.isFinite(odds)) {
+        return null;
+      }
+
+      if (odds < 0) {
+
+        return (
+          Math.abs(odds) /
+          (
+            Math.abs(odds) +
+            100
+          )
         );
+      }
+
+      if (odds > 0) {
+
+        return (
+          100 /
+          (
+            odds +
+            100
+          )
+        );
+      }
+
+      return null;
+    }
+
+    function calculateProp(
+      index,
+      playerId,
+      propName
+    ) {
 
       const lineInput =
         document.getElementById(
-          `line-${id}`
+          `line-${index}`
         );
 
       const oddsInput =
         document.getElementById(
-          `odds-${id}`
+          `odds-${index}`
         );
 
-      toggle.addEventListener(
-        "click",
+      const result =
+        document.getElementById(
+          `result-${index}`
+        );
+
+      const line =
+        Number(
+          lineInput?.value
+        );
+
+      const odds =
+        Number(
+          oddsInput?.value
+        );
+
+      if (
+        !Number.isFinite(line)
+      ) {
+
+        result.innerHTML =
+          "Enter a valid sportsbook line.";
+
+        result.classList.add(
+          "show"
+        );
+
+        return;
+      }
+
+      const prop =
+        playerProjections(
+          currentGame,
+          playerId
+        ).find(
+          x => x.prop === propName
+        );
+
+      if (!prop) {
+
+        result.innerHTML =
+          "Projection unavailable.";
+
+        result.classList.add(
+          "show"
+        );
+
+        return;
+      }
+
+      const probs =
+        histogramProbabilities(
+          prop.simulation_histogram,
+          line
+        );
+
+      const implied =
+        impliedProbability(
+          odds
+        );
+
+      const overPct =
+        probs.over * 100;
+
+      const underPct =
+        probs.under * 100;
+
+      const pushPct =
+        probs.push * 100;
+
+      let oddsCopy = "";
+
+      if (implied !== null) {
+
+        const overDifference =
+          overPct -
+          implied * 100;
+
+        const underDifference =
+          underPct -
+          implied * 100;
+
+        oddsCopy = `
+          <br><br>
+          Entered price implied probability:
+          <strong>
+            ${(implied * 100).toFixed(1)}%
+          </strong>.
+          <br>
+          Over model difference:
+          <strong>
+            ${overDifference >= 0 ? "+" : ""}
+            ${overDifference.toFixed(1)}
+            pts
+          </strong>.
+          <br>
+          Under model difference:
+          <strong>
+            ${underDifference >= 0 ? "+" : ""}
+            ${underDifference.toFixed(1)}
+            pts
+          </strong>.
+        `;
+      }
+
+      result.innerHTML = `
+        <strong>
+          ${escapeHtml(
+            prettyProp(
+              propName
+            )
+          )}
+          ${line}
+        </strong>
+        <br><br>
+        Model Over:
+        <strong>
+          ${overPct.toFixed(1)}%
+        </strong>
+        <br>
+        Model Under:
+        <strong>
+          ${underPct.toFixed(1)}%
+        </strong>
+        ${
+          pushPct > 0
+          ?
+          `
+            <br>
+            Push:
+            <strong>
+              ${pushPct.toFixed(1)}%
+            </strong>
+          `
+          :
+          ""
+        }
+        ${oddsCopy}
+        <br><br>
+        <span style="color:#888;">
+          Model probabilities come from the stored
+          20,000-outcome empirical distribution.
+          They are estimates, not guarantees.
+        </span>
+      `;
+
+      result.classList.add(
+        "show"
+      );
+    }
+
+    function showMatchups() {
+
+      currentGame = null;
+      currentPlayerId = null;
+
+      setActiveNav(
+        "navMatchups"
+      );
+
+      const projections =
+        [
+          ...(
+            jproData?.projections ||
+            []
+          )
+        ];
+
+      projections.sort(
+        (a, b) => {
+
+          const scoreA =
+            Number(
+              a.matchup?.matchup_score ||
+              0
+            );
+
+          const scoreB =
+            Number(
+              b.matchup?.matchup_score ||
+              0
+            );
+
+          return (
+            scoreB - scoreA
+          );
+        }
+      );
+
+      const top =
+        projections.slice(
+          0,
+          30
+        );
+
+      content.innerHTML = `
+        <div class="eyebrow">
+          ${escapeHtml(
+            jproData?.slate ||
+            "Current Slate"
+          )}
+        </div>
+
+        <h1 class="page-title">
+          Matchups
+        </h1>
+
+        <div class="page-subtitle">
+          Highest opponent matchup scores on the current slate.
+          These scores describe defensive environment,
+          not automatic betting recommendations.
+        </div>
+
+        ${
+          top.map(prop => {
+
+            const matchup =
+              prop.matchup || {};
+
+            return `
+              <div
+                class="card player-card tap-card"
+                onclick='showPlayer(
+                  ${JSON.stringify(
+                    prop.game
+                  )},
+                  ${JSON.stringify(
+                    String(
+                      prop.player_id
+                    )
+                  )}
+                )'
+              >
+
+                <div class="player-row">
+
+                  <div>
+
+                    <div class="player-name">
+                      ${escapeHtml(
+                        prop.player
+                      )}
+                    </div>
+
+                    <div class="player-meta">
+                      ${escapeHtml(
+                        prop.team
+                      )}
+                      vs
+                      ${escapeHtml(
+                        prop.opponent
+                      )}
+                      ·
+                      ${escapeHtml(
+                        prettyProp(
+                          prop.prop
+                        )
+                      )}
+                    </div>
+
+                  </div>
+
+                  <div
+                    class="score-pill"
+                  >
+                    ${escapeHtml(
+                      matchup.matchup_label ||
+                      "UNKNOWN"
+                    )}
+                    ·
+                    ${Number(
+                      matchup.matchup_score ||
+                      0
+                    ).toFixed(1)}
+                  </div>
+
+                </div>
+
+              </div>
+            `;
+          }).join("")
+        }
+      `;
+    }
+
+    function showPicks() {
+
+      currentGame = null;
+      currentPlayerId = null;
+
+      setActiveNav(
+        "navPicks"
+      );
+
+      content.innerHTML = `
+        <div class="eyebrow">
+          JPro Decision Layer
+        </div>
+
+        <h1 class="page-title">
+          JPro Picks
+        </h1>
+
+        <div class="page-subtitle">
+          Qualified line evaluations will appear here.
+        </div>
+
+        <div class="empty">
+          JPro does not force a pick from a projection alone.
+          The engine now has simulations, role intelligence
+          and matchup intelligence, but a sportsbook line
+          and price still need to be evaluated before a
+          betting side can qualify for this page.
+          <br><br>
+          The next JPro Picks upgrade will combine those
+          inputs with minimum evidence requirements instead
+          of filling this screen with automatic picks.
+        </div>
+      `;
+    }
+
+    async function loadJPro() {
+
+      try {
+
+        const response =
+          await fetch(
+            `data/jpro-current-projections.json?v=${Date.now()}`,
+            {
+              cache: "no-store"
+            }
+          );
+
+        if (!response.ok) {
+
+          throw new Error(
+            `HTTP ${response.status}`
+          );
+        }
+
+        jproData =
+          await response.json();
+
+        const badge =
+          document.getElementById(
+            "engineBadge"
+          );
+
+        if (
+          jproData.matchup_intelligence
+          &&
+          jproData.role_intelligence
+        ) {
+
+          badge.textContent =
+            "JPRO INTELLIGENCE";
+        }
+        else {
+
+          badge.textContent =
+            "20K ENGINE";
+        }
+
+        showGames();
+
+      }
+      catch (error) {
+
+        console.error(error);
+
+        content.innerHTML = `
+          <div class="eyebrow">
+            JPro
+          </div>
+
+          <h1 class="page-title">
+            Engine Offline
+          </h1>
+
+          <div class="page-subtitle">
+            The latest JPro data could not be loaded.
+          </div>
+
+          <div class="empty">
+            Refresh the app after the GitHub workflow
+            has finished publishing the latest JSON.
+          </div>
+        `;
+      }
+    }
+
+    if (
+      "serviceWorker" in navigator
+    ) {
+
+      window.addEventListener(
+        "load",
         () => {
 
-          calc.classList.toggle(
-            "open"
+          navigator.serviceWorker.register(
+            "sw.js"
+          ).catch(
+            error =>
+              console.log(
+                "SW:",
+                error
+              )
           );
-
-          toggle.textContent =
-            calc.classList.contains(
-              "open"
-            )
-              ? "CLOSE PROP CALCULATOR"
-              : "OPEN PROP CALCULATOR";
         }
-      );
-
-      const recalc =
-        () =>
-          calculateProp(
-            prop,
-            id
-          );
-
-      lineInput.addEventListener(
-        "input",
-        recalc
-      );
-
-      oddsInput.addEventListener(
-        "input",
-        recalc
-      );
-
-      calculateProp(
-        prop,
-        id
-      );
-    }
-  );
-
-  showScreen(
-    "player"
-  );
-}
-
-function calculateProp(
-  prop,
-  id
-) {
-
-  const line =
-    Number(
-      document.getElementById(
-        `line-${id}`
-      ).value
-    );
-
-  const odds =
-    Number(
-      document.getElementById(
-        `odds-${id}`
-      ).value
-    );
-
-  if (
-    !Number.isFinite(
-      line
-    )
-  ) {
-
-    return;
-  }
-
-  let over = 0;
-  let under = 0;
-  let pushes = 0;
-  let totalSims = 0;
-
-  /*
-    NEW FULL-SLATE FORMAT
-
-    [
-      [statValue, occurrenceCount],
-      ...
-    ]
-
-    This is mathematically the same empirical
-    simulation distribution, but dramatically
-    smaller than storing 20,000 raw values.
-  */
-
-  if (
-    Array.isArray(
-      prop.simulation_histogram
-    ) &&
-    prop.simulation_histogram.length
-  ) {
-
-    prop.simulation_histogram.forEach(
-      entry => {
-
-        const value =
-          Number(
-            entry[0]
-          );
-
-        const count =
-          Number(
-            entry[1]
-          );
-
-        if (
-          !Number.isFinite(
-            value
-          ) ||
-          !Number.isFinite(
-            count
-          )
-        ) {
-
-          return;
-        }
-
-        totalSims +=
-          count;
-
-        if (
-          value > line
-        ) {
-
-          over +=
-            count;
-
-        } else if (
-          value < line
-        ) {
-
-          under +=
-            count;
-
-        } else {
-
-          pushes +=
-            count;
-        }
-      }
-    );
-  }
-
-  /*
-    BACKWARD COMPATIBILITY
-
-    Yesterday's NYG @ LA JSON still uses
-    simulation_values. This keeps the
-    current working engine functional.
-  */
-
-  else if (
-    Array.isArray(
-      prop.simulation_values
-    ) &&
-    prop.simulation_values.length
-  ) {
-
-    totalSims =
-      prop.simulation_values.length;
-
-    prop.simulation_values.forEach(
-      value => {
-
-        const n =
-          Number(
-            value
-          );
-
-        if (
-          n > line
-        ) {
-
-          over++;
-
-        } else if (
-          n < line
-        ) {
-
-          under++;
-
-        } else {
-
-          pushes++;
-        }
-      }
-    );
-
-  } else {
-
-    document.getElementById(
-      `edge-${id}`
-    ).textContent =
-      "Simulation distribution unavailable.";
-
-    return;
-  }
-
-  const decisions =
-    over +
-    under;
-
-  if (
-    !decisions
-  ) {
-
-    return;
-  }
-
-  /*
-    Pushes are excluded from the conditional
-    win probability for whole-number lines.
-  */
-
-  const overP =
-    over /
-    decisions;
-
-  const underP =
-    under /
-    decisions;
-
-  const implied =
-    impliedProbability(
-      odds
-    );
-
-  document.getElementById(
-    `over-${id}`
-  ).textContent =
-    pct(
-      overP
-    );
-
-  document.getElementById(
-    `under-${id}`
-  ).textContent =
-    pct(
-      underP
-    );
-
-  document.getElementById(
-    `overCount-${id}`
-  ).textContent =
-    `${over.toLocaleString()} / ` +
-    `${totalSims.toLocaleString()} sims`;
-
-  document.getElementById(
-    `underCount-${id}`
-  ).textContent =
-    `${under.toLocaleString()} / ` +
-    `${totalSims.toLocaleString()} sims`;
-
-  document.getElementById(
-    `overFair-${id}`
-  ).textContent =
-    fairAmerican(
-      overP
-    );
-
-  document.getElementById(
-    `underFair-${id}`
-  ).textContent =
-    fairAmerican(
-      underP
-    );
-
-  const edge =
-    document.getElementById(
-      `edge-${id}`
-    );
-
-  if (
-    implied === null
-  ) {
-
-    edge.textContent =
-      "Enter valid American odds to compare the price.";
-
-    return;
-  }
-
-  const overEdge =
-    overP -
-    implied;
-
-  const underEdge =
-    underP -
-    implied;
-
-  const side =
-    overEdge >= underEdge
-      ? "OVER"
-      : "UNDER";
-
-  const best =
-    Math.max(
-      overEdge,
-      underEdge
-    );
-
-  const modelP =
-    side === "OVER"
-      ? overP
-      : underP;
-
-  edge.textContent =
-    `${side} • JPro ${pct(modelP)} ` +
-    `vs sportsbook implied ${pct(implied)} ` +
-    `• probability difference ` +
-    `${best >= 0 ? "+" : ""}` +
-    `${(best * 100).toFixed(1)} pts` +
-    (
-      pushes
-        ? ` • ${pushes.toLocaleString()} pushes excluded`
-        : ""
-    );
-}
-
-document.getElementById(
-  "gameBack"
-).addEventListener(
-  "click",
-  () => {
-
-    showScreen(
-      "games"
-    );
-  }
-);
-
-document.getElementById(
-  "playerBack"
-).addEventListener(
-  "click",
-  () => {
-
-    renderGame(
-      currentGame
-    );
-  }
-);
-
-document.querySelectorAll(
-  ".nav-btn"
-).forEach(
-  btn => {
-
-    btn.addEventListener(
-      "click",
-      () =>
-        showScreen(
-          btn.dataset.screen
-        )
-    );
-  }
-);
-
-async function loadJPro() {
-
-  try {
-
-    const response =
-      await fetch(
-        DATA_URL,
-        {
-          cache:
-            "no-store"
-        }
-      );
-
-    if (
-      !response.ok
-    ) {
-
-      throw new Error(
-        "JPro data unavailable"
       );
     }
 
-    jproData =
-      await response.json();
+    loadJPro();
 
-    if (
-      !Array.isArray(
-        jproData.projections
-      ) ||
-      !jproData.projections.length
-    ) {
-
-      throw new Error(
-        "No projections found"
-      );
-    }
-
-    players =
-      groupPlayers(
-        jproData.projections
-      );
-
-    renderHome();
-
-  } catch (
-    error
-  ) {
-
-    console.error(
-      error
-    );
-
-    document.getElementById(
-      "gamesList"
-    ).innerHTML = `
-      <div class="status">
-        JPro couldn't load the simulation file.
-        Refresh after the latest engine run
-        has finished.
-      </div>
-    `;
-  }
-}
-
-loadJPro();
-
-if (
-  "serviceWorker" in navigator
-) {
-
-  window.addEventListener(
-    "load",
-    () => {
-
-      navigator.serviceWorker
-        .register(
-          "./sw.js"
-        )
-        .catch(
-          () => {}
-        );
-    }
-  );
-}
-
-</script>
+  </script>
 
 </body>
 </html>
