@@ -6,133 +6,439 @@
 <meta name="theme-color" content="#050505">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
+
 <title>JPro Model V2</title>
+
 <link rel="manifest" href="manifest.webmanifest">
 
 <style>
-*{box-sizing:border-box}
-body{
-  margin:0;background:#050505;color:#fff;
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif
+* {
+  box-sizing: border-box;
 }
-button,input{font:inherit}
-button{color:inherit}
-.app{
-  width:100%;max-width:760px;margin:auto;
-  padding:calc(18px + env(safe-area-inset-top)) 16px
-  calc(105px + env(safe-area-inset-bottom))
+
+body {
+  margin: 0;
+  background: #050505;
+  color: #fff;
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
-.header{display:flex;justify-content:space-between;align-items:flex-start}
-.brand{font-size:34px;font-weight:950;letter-spacing:-2px}
-.subtitle{margin-top:2px;color:#777;font-size:10px;font-weight:800;letter-spacing:2px}
-.badge{
-  border:1px solid #333;border-radius:999px;padding:7px 9px;
-  font-size:9px;font-weight:900;color:#bbb;letter-spacing:.7px
+
+button,
+input {
+  font: inherit;
 }
-.hero{margin-top:28px}
-.eyebrow{color:#777;font-size:10px;font-weight:900;letter-spacing:1.4px}
-h1{font-size:28px;margin:7px 0 5px;letter-spacing:-1px}
-.hero p{color:#888;font-size:12px;line-height:1.5;margin:0}
-.section-title{font-size:19px;font-weight:950;margin:28px 0 12px}
-.card{
-  background:#0d0d0d;border:1px solid #252525;border-radius:16px;
-  padding:18px;margin-bottom:12px
+
+button {
+  color: inherit;
 }
-.game-card{cursor:pointer}
-.game-row{display:flex;justify-content:space-between;align-items:center;gap:15px}
-.game-name{font-size:23px;font-weight:950}
-.game-arrow{font-size:22px;color:#777}
-.muted{color:#777;font-size:11px;margin-top:6px}
-.player-row{
-  width:100%;border:0;text-align:left;cursor:pointer;
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
-  background:#0d0d0d;border:1px solid #252525;border-radius:14px;
-  padding:15px;margin-bottom:9px
+
+.app {
+  width: 100%;
+  max-width: 760px;
+  margin: auto;
+  padding:
+    calc(18px + env(safe-area-inset-top))
+    16px
+    calc(105px + env(safe-area-inset-bottom));
 }
-.player-name{font-size:16px;font-weight:900}
-.player-meta{color:#777;font-size:10px;font-weight:800;margin-top:4px}
-.chevron{color:#666;font-size:20px}
-.back{
-  border:0;background:none;padding:6px 0;margin-bottom:18px;
-  color:#aaa;font-size:13px;font-weight:800;cursor:pointer
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
 }
-.player-hero{
-  padding:20px;background:#0d0d0d;border:1px solid #252525;
-  border-radius:16px
+
+.brand {
+  font-size: 34px;
+  font-weight: 950;
+  letter-spacing: -2px;
 }
-.player-hero h2{margin:0;font-size:27px;letter-spacing:-.8px}
-.player-hero .meta{color:#888;font-size:11px;font-weight:800;margin-top:5px}
-.analysis-label{
-  margin-top:20px;color:#777;font-size:9px;font-weight:900;letter-spacing:1.2px
+
+.subtitle {
+  margin-top: 2px;
+  color: #777;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 2px;
 }
-.analysis-copy{font-size:13px;line-height:1.6;color:#bbb;margin-top:7px}
-.prop-card{
-  background:#0d0d0d;border:1px solid #252525;border-radius:16px;
-  padding:17px;margin-bottom:12px
+
+.badge {
+  border: 1px solid #333;
+  border-radius: 999px;
+  padding: 7px 9px;
+  font-size: 9px;
+  font-weight: 900;
+  color: #bbb;
+  letter-spacing: .7px;
 }
-.prop-name{font-size:14px;font-weight:950;text-transform:uppercase}
-.metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}
-.metric{background:#151515;border-radius:11px;padding:12px}
-.metric-label{font-size:8px;color:#777;font-weight:900;letter-spacing:1px}
-.metric-value{font-size:22px;font-weight:950;margin-top:4px}
-.range{margin-top:9px;color:#777;font-size:10px}
-.calc-toggle{
-  width:100%;margin-top:14px;padding:12px;border-radius:10px;
-  background:#151515;border:1px solid #292929;font-size:11px;
-  font-weight:900;cursor:pointer
+
+.hero {
+  margin-top: 28px;
 }
-.calculator{display:none;margin-top:13px;padding-top:13px;border-top:1px solid #292929}
-.calculator.open{display:block}
-.inputs{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.field label{
-  display:block;color:#777;font-size:8px;font-weight:900;
-  letter-spacing:1px;margin-bottom:5px
+
+.eyebrow {
+  color: #777;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 1.4px;
 }
-.field input{
-  width:100%;min-height:45px;background:#050505;color:#fff;
-  border:1px solid #393939;border-radius:9px;padding:10px;
-  font-size:16px;font-weight:850;outline:none
+
+h1 {
+  font-size: 28px;
+  margin: 7px 0 5px;
+  letter-spacing: -1px;
 }
-.field input:focus{border-color:#fff}
-.calc-results{margin-top:12px}
-.result-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
-.result{
-  background:#151515;border-radius:10px;padding:12px
+
+.hero p {
+  color: #888;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
 }
-.result-title{color:#777;font-size:8px;font-weight:900;letter-spacing:1px}
-.result-big{font-size:20px;font-weight:950;margin-top:4px}
-.result-small{color:#888;font-size:9px;margin-top:4px}
-.edge{
-  margin-top:9px;padding:12px;background:#151515;border-radius:10px;
-  font-size:11px;line-height:1.5;color:#aaa
+
+.section-title {
+  font-size: 19px;
+  font-weight: 950;
+  margin: 28px 0 12px;
 }
-.placeholder{
-  padding:22px;background:#0d0d0d;border:1px solid #252525;
-  border-radius:16px
+
+.card {
+  background: #0d0d0d;
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 18px;
+  margin-bottom: 12px;
 }
-.placeholder strong{font-size:17px}
-.placeholder p{color:#888;font-size:12px;line-height:1.55;margin-bottom:0}
-.status{
-  padding:18px;background:#0d0d0d;border:1px solid #252525;
-  border-radius:14px;color:#999;font-size:12px
+
+.game-card {
+  cursor: pointer;
 }
-.hidden{display:none!important}
-.bottom-nav{
-  position:fixed;z-index:50;left:0;right:0;bottom:0;
-  background:rgba(5,5,5,.97);border-top:1px solid #222;
-  padding:10px 10px calc(10px + env(safe-area-inset-bottom));
-  backdrop-filter:blur(15px)
+
+.game-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
 }
-.nav-inner{
-  max-width:760px;margin:auto;display:grid;grid-template-columns:repeat(3,1fr)
+
+.game-name {
+  font-size: 23px;
+  font-weight: 950;
 }
-.nav-btn{
-  border:0;background:none;padding:10px 4px;color:#666;
-  font-size:9px;font-weight:950;letter-spacing:.7px;cursor:pointer
+
+.game-arrow {
+  font-size: 22px;
+  color: #777;
 }
-.nav-btn.active{color:#fff}
-@media(max-width:360px){
-  .inputs,.result-grid{grid-template-columns:1fr}
+
+.muted {
+  color: #777;
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.player-row {
+  width: 100%;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #0d0d0d;
+  border: 1px solid #252525;
+  border-radius: 14px;
+  padding: 15px;
+  margin-bottom: 9px;
+}
+
+.player-name {
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.player-meta {
+  color: #777;
+  font-size: 10px;
+  font-weight: 800;
+  margin-top: 4px;
+}
+
+.chevron {
+  color: #666;
+  font-size: 20px;
+}
+
+.back {
+  border: 0;
+  background: none;
+  padding: 6px 0;
+  margin-bottom: 18px;
+  color: #aaa;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.player-hero {
+  padding: 20px;
+  background: #0d0d0d;
+  border: 1px solid #252525;
+  border-radius: 16px;
+}
+
+.player-hero h2 {
+  margin: 0;
+  font-size: 27px;
+  letter-spacing: -.8px;
+}
+
+.player-hero .meta {
+  color: #888;
+  font-size: 11px;
+  font-weight: 800;
+  margin-top: 5px;
+}
+
+.analysis-label {
+  margin-top: 20px;
+  color: #777;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 1.2px;
+}
+
+.analysis-copy {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #bbb;
+  margin-top: 7px;
+}
+
+.prop-card {
+  background: #0d0d0d;
+  border: 1px solid #252525;
+  border-radius: 16px;
+  padding: 17px;
+  margin-bottom: 12px;
+}
+
+.prop-name {
+  font-size: 14px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+  margin-top: 13px;
+}
+
+.metric {
+  background: #151515;
+  border-radius: 11px;
+  padding: 12px;
+}
+
+.metric-label {
+  font-size: 8px;
+  color: #777;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.metric-value {
+  font-size: 22px;
+  font-weight: 950;
+  margin-top: 4px;
+}
+
+.range {
+  margin-top: 9px;
+  color: #777;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.calc-toggle {
+  width: 100%;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #151515;
+  border: 1px solid #292929;
+  font-size: 11px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.calculator {
+  display: none;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid #292929;
+}
+
+.calculator.open {
+  display: block;
+}
+
+.inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.field label {
+  display: block;
+  color: #777;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 1px;
+  margin-bottom: 5px;
+}
+
+.field input {
+  width: 100%;
+  min-height: 45px;
+  background: #050505;
+  color: #fff;
+  border: 1px solid #393939;
+  border-radius: 9px;
+  padding: 10px;
+  font-size: 16px;
+  font-weight: 850;
+  outline: none;
+}
+
+.field input:focus {
+  border-color: #fff;
+}
+
+.calc-results {
+  margin-top: 12px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
+.result {
+  background: #151515;
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.result-title {
+  color: #777;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.result-big {
+  font-size: 20px;
+  font-weight: 950;
+  margin-top: 4px;
+}
+
+.result-small {
+  color: #888;
+  font-size: 9px;
+  margin-top: 4px;
+}
+
+.edge {
+  margin-top: 9px;
+  padding: 12px;
+  background: #151515;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #aaa;
+}
+
+.placeholder {
+  padding: 22px;
+  background: #0d0d0d;
+  border: 1px solid #252525;
+  border-radius: 16px;
+}
+
+.placeholder strong {
+  font-size: 17px;
+}
+
+.placeholder p {
+  color: #888;
+  font-size: 12px;
+  line-height: 1.55;
+  margin-bottom: 0;
+}
+
+.status {
+  padding: 18px;
+  background: #0d0d0d;
+  border: 1px solid #252525;
+  border-radius: 14px;
+  color: #999;
+  font-size: 12px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.bottom-nav {
+  position: fixed;
+  z-index: 50;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(5,5,5,.97);
+  border-top: 1px solid #222;
+  padding:
+    10px 10px
+    calc(10px + env(safe-area-inset-bottom));
+  backdrop-filter: blur(15px);
+}
+
+.nav-inner {
+  max-width: 760px;
+  margin: auto;
+  display: grid;
+  grid-template-columns: repeat(3,1fr);
+}
+
+.nav-btn {
+  border: 0;
+  background: none;
+  padding: 10px 4px;
+  color: #666;
+  font-size: 9px;
+  font-weight: 950;
+  letter-spacing: .7px;
+  cursor: pointer;
+}
+
+.nav-btn.active {
+  color: #fff;
+}
+
+@media(max-width:360px) {
+  .inputs,
+  .result-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>
 </head>
@@ -146,481 +452,1559 @@ h1{font-size:28px;margin:7px 0 5px;letter-spacing:-1px}
     <div class="brand">JPRO</div>
     <div class="subtitle">THE JPRO MODEL V2</div>
   </div>
-  <div class="badge">20K ENGINE</div>
+
+  <div class="badge">
+    20K ENGINE
+  </div>
 </header>
 
 <section id="gamesScreen">
+
   <div class="hero">
-    <div class="eyebrow">NFL ANALYSIS</div>
+    <div class="eyebrow">
+      NFL ANALYSIS
+    </div>
+
     <h1>Games</h1>
-    <p>Select a matchup to open JPro's player analysis.</p>
+
+    <p>
+      Select a matchup to open JPro's player analysis.
+    </p>
   </div>
 
-  <div class="section-title">Current Slate</div>
+  <div class="section-title">
+    Current Slate
+  </div>
 
   <div id="gamesList">
-    <div class="status">Loading JPro...</div>
-  </div>
-</section>
-
-<section id="gameScreen" class="hidden">
-  <button class="back" id="gameBack">← Games</button>
-
-  <div class="eyebrow">GAME ANALYSIS</div>
-  <h1 id="gameTitle">Game</h1>
-  <p class="muted">Select a player for full JPro analysis.</p>
-
-  <div class="section-title">Players</div>
-  <div id="playerList"></div>
-</section>
-
-<section id="playerScreen" class="hidden">
-  <button class="back" id="playerBack">← Game</button>
-
-  <div class="player-hero">
-    <h2 id="playerTitle">Player</h2>
-    <div class="meta" id="playerMeta"></div>
-
-    <div class="analysis-label">JPRO PLAYER ANALYSIS</div>
-    <div class="analysis-copy" id="playerCopy">
-      Current projections are generated from JPro's historical model and
-      20,000-outcome simulation distribution. Matchup, role and defensive
-      intelligence will populate here as the next data layer is connected.
+    <div class="status">
+      Loading JPro...
     </div>
   </div>
 
-  <div class="section-title">Projections</div>
+</section>
+
+<section
+  id="gameScreen"
+  class="hidden"
+>
+
+  <button
+    class="back"
+    id="gameBack"
+  >
+    ← Games
+  </button>
+
+  <div class="eyebrow">
+    GAME ANALYSIS
+  </div>
+
+  <h1 id="gameTitle">
+    Game
+  </h1>
+
+  <p class="muted">
+    Select a player for full JPro analysis.
+  </p>
+
+  <div class="section-title">
+    Players
+  </div>
+
+  <div id="playerList"></div>
+
+</section>
+
+<section
+  id="playerScreen"
+  class="hidden"
+>
+
+  <button
+    class="back"
+    id="playerBack"
+  >
+    ← Game
+  </button>
+
+  <div class="player-hero">
+
+    <h2 id="playerTitle">
+      Player
+    </h2>
+
+    <div
+      class="meta"
+      id="playerMeta"
+    ></div>
+
+    <div class="analysis-label">
+      JPRO PLAYER ANALYSIS
+    </div>
+
+    <div
+      class="analysis-copy"
+      id="playerCopy"
+    >
+      Current projections are generated from
+      JPro's historical model and 20,000-outcome
+      simulation distribution. Matchup, role and
+      defensive intelligence will populate here
+      as the next data layer is connected.
+    </div>
+
+  </div>
+
+  <div class="section-title">
+    Projections
+  </div>
+
   <div id="playerProps"></div>
+
 </section>
 
-<section id="matchupsScreen" class="hidden">
+<section
+  id="matchupsScreen"
+  class="hidden"
+>
+
   <div class="hero">
-    <div class="eyebrow">WEEKLY INTELLIGENCE</div>
+
+    <div class="eyebrow">
+      WEEKLY INTELLIGENCE
+    </div>
+
     <h1>Matchups</h1>
-    <p>JPro's strongest player situations across the entire slate.</p>
+
+    <p>
+      JPro's strongest player situations
+      across the entire slate.
+    </p>
+
   </div>
 
-  <div class="section-title">Top Matchups</div>
+  <div class="section-title">
+    Top Matchups
+  </div>
 
   <div class="placeholder">
-    <strong>Matchup Engine Next</strong>
+
+    <strong>
+      Matchup Engine Next
+    </strong>
+
     <p>
-      This page will rank player situations using opponent defense,
-      expected role, usage, game environment and JPro's simulations.
-      TD matchups will also live here.
+      This page will identify notable player
+      situations using opponent defense,
+      expected role, usage, game environment
+      and JPro's simulations. TD matchups will
+      also live here.
     </p>
+
   </div>
+
 </section>
 
-<section id="picksScreen" class="hidden">
+<section
+  id="picksScreen"
+  class="hidden"
+>
+
   <div class="hero">
-    <div class="eyebrow">MODEL FILTER</div>
+
+    <div class="eyebrow">
+      MODEL FILTER
+    </div>
+
     <h1>JPro Picks</h1>
-    <p>Props only appear here when JPro's evidence meets the required criteria.</p>
+
+    <p>
+      Props appear here when JPro's evidence
+      meets the required criteria.
+    </p>
+
   </div>
 
-  <div class="section-title">Qualified Plays</div>
+  <div class="section-title">
+    Qualified Plays
+  </div>
 
   <div class="placeholder">
-    <strong>No forced picks.</strong>
+
+    <strong>
+      No forced picks.
+    </strong>
+
     <p>
-      The finished engine will combine the simulation distribution,
-      matchup quality, expected role and the evaluated sportsbook line
-      before promoting anything to this page.
+      The finished engine will combine the
+      simulation distribution, matchup quality,
+      expected role and evaluated sportsbook
+      line before promoting a prop here.
     </p>
+
   </div>
+
 </section>
 
 </main>
 
 <nav class="bottom-nav">
+
   <div class="nav-inner">
-    <button class="nav-btn active" data-screen="games">GAMES</button>
-    <button class="nav-btn" data-screen="matchups">MATCHUPS</button>
-    <button class="nav-btn" data-screen="picks">JPRO PICKS</button>
+
+    <button
+      class="nav-btn active"
+      data-screen="games"
+    >
+      GAMES
+    </button>
+
+    <button
+      class="nav-btn"
+      data-screen="matchups"
+    >
+      MATCHUPS
+    </button>
+
+    <button
+      class="nav-btn"
+      data-screen="picks"
+    >
+      JPRO PICKS
+    </button>
+
   </div>
+
 </nav>
 
 <script>
+
 const DATA_URL =
-  "data/jpro-current-projections.json?v=" + Date.now();
+  "data/jpro-current-projections.json?v=" +
+  Date.now();
 
 const screens = {
-  games: document.getElementById("gamesScreen"),
-  game: document.getElementById("gameScreen"),
-  player: document.getElementById("playerScreen"),
-  matchups: document.getElementById("matchupsScreen"),
-  picks: document.getElementById("picksScreen")
+  games:
+    document.getElementById("gamesScreen"),
+
+  game:
+    document.getElementById("gameScreen"),
+
+  player:
+    document.getElementById("playerScreen"),
+
+  matchups:
+    document.getElementById("matchupsScreen"),
+
+  picks:
+    document.getElementById("picksScreen")
 };
 
 const propNames = {
-  passing_yards: "Passing Yards",
-  rushing_yards: "Rushing Yards",
-  receiving_yards: "Receiving Yards",
-  receptions: "Receptions"
+  passing_yards:
+    "Passing Yards",
+
+  rushing_yards:
+    "Rushing Yards",
+
+  receiving_yards:
+    "Receiving Yards",
+
+  receptions:
+    "Receptions",
+
+  anytime_td:
+    "Anytime TD",
+
+  two_plus_td:
+    "2+ Touchdowns",
+
+  three_plus_td:
+    "3+ Touchdowns"
 };
 
 let jproData = null;
+
 let players = [];
+
 let currentPlayer = null;
 
-function showScreen(name) {
-  Object.values(screens).forEach(x => x.classList.add("hidden"));
-  screens[name].classList.remove("hidden");
+let currentGame = null;
 
-  document.querySelectorAll(".nav-btn").forEach(btn => {
+function showScreen(name) {
+
+  Object.values(
+    screens
+  ).forEach(
+    screen =>
+      screen.classList.add(
+        "hidden"
+      )
+  );
+
+  screens[
+    name
+  ].classList.remove(
+    "hidden"
+  );
+
+  document.querySelectorAll(
+    ".nav-btn"
+  ).forEach(btn => {
+
     btn.classList.toggle(
       "active",
+
       btn.dataset.screen === name ||
-      (name === "game" && btn.dataset.screen === "games") ||
-      (name === "player" && btn.dataset.screen === "games")
+
+      (
+        name === "game" &&
+        btn.dataset.screen === "games"
+      ) ||
+
+      (
+        name === "player" &&
+        btn.dataset.screen === "games"
+      )
     );
+
   });
 
-  window.scrollTo(0, 0);
+  window.scrollTo(
+    0,
+    0
+  );
 }
 
 function escapeHtml(value) {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+
+  return String(
+    value ?? ""
+  )
+  .replaceAll(
+    "&",
+    "&amp;"
+  )
+  .replaceAll(
+    "<",
+    "&lt;"
+  )
+  .replaceAll(
+    ">",
+    "&gt;"
+  )
+  .replaceAll(
+    '"',
+    "&quot;"
+  )
+  .replaceAll(
+    "'",
+    "&#039;"
+  );
 }
 
-function groupPlayers(projections) {
-  const map = new Map();
+function groupPlayers(
+  projections
+) {
 
-  projections.forEach(prop => {
-    const key = prop.player_id || prop.player;
+  const map =
+    new Map();
 
-    if (!map.has(key)) {
-      map.set(key, {
-        id: key,
-        name: prop.player,
-        team: prop.team,
-        position: prop.position,
-        props: []
-      });
+  projections.forEach(
+    prop => {
+
+      const key =
+        prop.player_id ||
+        prop.player;
+
+      if (
+        !map.has(key)
+      ) {
+
+        map.set(
+          key,
+          {
+            id: key,
+            name:
+              prop.player,
+            team:
+              prop.team,
+            position:
+              prop.position,
+            game:
+              prop.game ||
+              jproData.game ||
+              "Current Game",
+            props: []
+          }
+        );
+      }
+
+      map.get(
+        key
+      ).props.push(
+        prop
+      );
+
     }
+  );
 
-    map.get(key).props.push(prop);
-  });
+  return [
+    ...map.values()
+  ].sort(
+    (a,b) => {
 
-  return [...map.values()].sort((a, b) => {
-    const teamCompare = String(a.team).localeCompare(String(b.team));
-    if (teamCompare !== 0) return teamCompare;
-    return String(a.name).localeCompare(String(b.name));
-  });
+      const teamCompare =
+        String(
+          a.team
+        ).localeCompare(
+          String(
+            b.team
+          )
+        );
+
+      if (
+        teamCompare !== 0
+      ) {
+        return teamCompare;
+      }
+
+      return String(
+        a.name
+      ).localeCompare(
+        String(
+          b.name
+        )
+      );
+    }
+  );
 }
 
-function fairAmerican(probability) {
-  if (!Number.isFinite(probability) || probability <= 0 || probability >= 1) {
+function getGames() {
+
+  if (
+    Array.isArray(
+      jproData.games
+    ) &&
+    jproData.games.length
+  ) {
+
+    return jproData.games.map(
+      game => {
+
+        if (
+          typeof game === "string"
+        ) {
+
+          return {
+            game: game
+          };
+        }
+
+        return game;
+      }
+    );
+  }
+
+  return [
+    {
+      game:
+        jproData.game ||
+        "Current Game"
+    }
+  ];
+}
+
+function playersForGame(
+  gameName
+) {
+
+  return players.filter(
+    player => {
+
+      if (
+        player.game ===
+        gameName
+      ) {
+        return true;
+      }
+
+      const game =
+        getGames().find(
+          g =>
+            (
+              g.game ||
+              g.name
+            ) === gameName
+        );
+
+      if (!game) {
+        return false;
+      }
+
+      const teams = [
+        game.away_team,
+        game.home_team
+      ].filter(Boolean);
+
+      return teams.includes(
+        player.team
+      );
+    }
+  );
+}
+
+function fairAmerican(
+  probability
+) {
+
+  if (
+    !Number.isFinite(
+      probability
+    ) ||
+    probability <= 0 ||
+    probability >= 1
+  ) {
+
     return "N/A";
   }
 
   let odds;
 
-  if (probability >= .5) {
-    odds = -100 * probability / (1 - probability);
+  if (
+    probability >= .5
+  ) {
+
+    odds =
+      -100 *
+      probability /
+      (
+        1 -
+        probability
+      );
+
   } else {
-    odds = 100 * (1 - probability) / probability;
+
+    odds =
+      100 *
+      (
+        1 -
+        probability
+      ) /
+      probability;
   }
 
-  odds = Math.round(odds);
-  return odds > 0 ? "+" + odds : String(odds);
+  odds =
+    Math.round(
+      odds
+    );
+
+  return odds > 0
+    ? "+" + odds
+    : String(
+        odds
+      );
 }
 
-function impliedProbability(american) {
-  const odds = Number(american);
+function impliedProbability(
+  american
+) {
 
-  if (!Number.isFinite(odds) || odds === 0) return null;
+  const odds =
+    Number(
+      american
+    );
 
-  if (odds > 0) return 100 / (odds + 100);
+  if (
+    !Number.isFinite(
+      odds
+    ) ||
+    odds === 0
+  ) {
 
-  return Math.abs(odds) / (Math.abs(odds) + 100);
+    return null;
+  }
+
+  if (
+    odds > 0
+  ) {
+
+    return (
+      100 /
+      (
+        odds +
+        100
+      )
+    );
+  }
+
+  return (
+    Math.abs(
+      odds
+    ) /
+    (
+      Math.abs(
+        odds
+      ) +
+      100
+    )
+  );
 }
 
 function pct(p) {
-  return (p * 100).toFixed(1) + "%";
+
+  return (
+    p *
+    100
+  ).toFixed(
+    1
+  ) + "%";
 }
 
-function defaultLine(prop) {
-  const median = Number(prop.median);
-  if (!Number.isFinite(median)) return "";
-  return (Math.floor(median) + .5).toFixed(1);
+function defaultLine(
+  prop
+) {
+
+  const median =
+    Number(
+      prop.median
+    );
+
+  if (
+    !Number.isFinite(
+      median
+    )
+  ) {
+
+    return "";
+  }
+
+  return (
+    Math.floor(
+      median
+    ) +
+    .5
+  ).toFixed(
+    1
+  );
 }
 
 function renderHome() {
-  const list = document.getElementById("gamesList");
 
-  list.innerHTML = `
-    <div class="card game-card" id="openGame">
-      <div class="game-row">
-        <div>
-          <div class="eyebrow">CURRENT MODEL</div>
-          <div class="game-name">${escapeHtml(jproData.game || "Current Game")}</div>
-          <div class="muted">
-            ${players.length} players • 20,000 simulations per prop
+  const list =
+    document.getElementById(
+      "gamesList"
+    );
+
+  const games =
+    getGames();
+
+  list.innerHTML =
+    "";
+
+  games.forEach(
+    gameData => {
+
+      const gameName =
+        gameData.game ||
+        gameData.name ||
+        `${
+          gameData.away_team ||
+          "AWAY"
+        } @ ${
+          gameData.home_team ||
+          "HOME"
+        }`;
+
+      const gamePlayers =
+        playersForGame(
+          gameName
+        );
+
+      const card =
+        document.createElement(
+          "div"
+        );
+
+      card.className =
+        "card game-card";
+
+      let details =
+        `${gamePlayers.length} modeled players`;
+
+      if (
+        gameData.gameday
+      ) {
+
+        details =
+          `${gameData.gameday} • ${details}`;
+      }
+
+      card.innerHTML = `
+        <div class="game-row">
+
+          <div>
+
+            <div class="eyebrow">
+              NFL MATCHUP
+            </div>
+
+            <div class="game-name">
+              ${escapeHtml(gameName)}
+            </div>
+
+            <div class="muted">
+              ${escapeHtml(details)}
+            </div>
+
           </div>
-        </div>
-        <div class="game-arrow">›</div>
-      </div>
-    </div>
-  `;
 
-  document.getElementById("openGame").addEventListener("click", renderGame);
+          <div class="game-arrow">
+            ›
+          </div>
+
+        </div>
+      `;
+
+      card.addEventListener(
+        "click",
+        () =>
+          renderGame(
+            gameName
+          )
+      );
+
+      list.appendChild(
+        card
+      );
+    }
+  );
 }
 
-function renderGame() {
-  document.getElementById("gameTitle").textContent =
-    jproData.game || "Current Game";
+function renderGame(
+  gameName
+) {
 
-  const list = document.getElementById("playerList");
-  list.innerHTML = "";
+  currentGame =
+    gameName ||
+    currentGame ||
+    jproData.game ||
+    "Current Game";
 
-  players.forEach(player => {
-    const btn = document.createElement("button");
-    btn.className = "player-row";
+  document.getElementById(
+    "gameTitle"
+  ).textContent =
+    currentGame;
 
-    btn.innerHTML = `
-      <div>
-        <div class="player-name">${escapeHtml(player.name)}</div>
-        <div class="player-meta">
-          ${escapeHtml(player.team)} • ${escapeHtml(player.position)}
-          • ${player.props.length} PROPS
-        </div>
+  const list =
+    document.getElementById(
+      "playerList"
+    );
+
+  list.innerHTML =
+    "";
+
+  const gamePlayers =
+    playersForGame(
+      currentGame
+    );
+
+  if (
+    !gamePlayers.length
+  ) {
+
+    list.innerHTML = `
+      <div class="status">
+        No modeled players are available
+        for this matchup yet.
       </div>
-      <div class="chevron">›</div>
     `;
 
-    btn.addEventListener("click", () => renderPlayer(player));
-    list.appendChild(btn);
-  });
+    showScreen(
+      "game"
+    );
 
-  showScreen("game");
+    return;
+  }
+
+  gamePlayers.forEach(
+    player => {
+
+      const btn =
+        document.createElement(
+          "button"
+        );
+
+      btn.className =
+        "player-row";
+
+      btn.innerHTML = `
+        <div>
+
+          <div class="player-name">
+            ${escapeHtml(player.name)}
+          </div>
+
+          <div class="player-meta">
+            ${escapeHtml(player.team)}
+            •
+            ${escapeHtml(player.position)}
+            •
+            ${player.props.length} PROPS
+          </div>
+
+        </div>
+
+        <div class="chevron">
+          ›
+        </div>
+      `;
+
+      btn.addEventListener(
+        "click",
+        () =>
+          renderPlayer(
+            player
+          )
+      );
+
+      list.appendChild(
+        btn
+      );
+    }
+  );
+
+  showScreen(
+    "game"
+  );
 }
 
-function renderPlayer(player) {
-  currentPlayer = player;
+function renderPlayer(
+  player
+) {
 
-  document.getElementById("playerTitle").textContent = player.name;
-  document.getElementById("playerMeta").textContent =
+  currentPlayer =
+    player;
+
+  document.getElementById(
+    "playerTitle"
+  ).textContent =
+    player.name;
+
+  document.getElementById(
+    "playerMeta"
+  ).textContent =
     `${player.team} • ${player.position}`;
 
-  const wrap = document.getElementById("playerProps");
-  wrap.innerHTML = "";
+  const wrap =
+    document.getElementById(
+      "playerProps"
+    );
 
-  player.props.forEach((prop, index) => {
-    const id = `p-${index}`;
+  wrap.innerHTML =
+    "";
 
-    const card = document.createElement("div");
-    card.className = "prop-card";
+  player.props.forEach(
+    (prop,index) => {
 
-    card.innerHTML = `
-      <div class="prop-name">
-        ${escapeHtml(propNames[prop.prop] || prop.prop)}
-      </div>
+      const id =
+        `p-${index}`;
 
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-label">JPRO PROJECTION</div>
-          <div class="metric-value">${Number(prop.projection).toFixed(1)}</div>
+      const card =
+        document.createElement(
+          "div"
+        );
+
+      card.className =
+        "prop-card";
+
+      const p10 =
+        Number(
+          prop.p10
+        );
+
+      const p25 =
+        Number(
+          prop.p25
+        );
+
+      const p75 =
+        Number(
+          prop.p75
+        );
+
+      const p90 =
+        Number(
+          prop.p90
+        );
+
+      card.innerHTML = `
+        <div class="prop-name">
+          ${
+            escapeHtml(
+              propNames[
+                prop.prop
+              ] ||
+              prop.prop
+            )
+          }
         </div>
 
-        <div class="metric">
-          <div class="metric-label">20K MEDIAN</div>
-          <div class="metric-value">${Number(prop.median).toFixed(1)}</div>
-        </div>
-      </div>
+        <div class="metrics">
 
-      <div class="range">
-        20K RANGE • P10 ${Number(prop.p10).toFixed(1)}
-        · P25 ${Number(prop.p25).toFixed(1)}
-        · P75 ${Number(prop.p75).toFixed(1)}
-        · P90 ${Number(prop.p90).toFixed(1)}
-      </div>
+          <div class="metric">
 
-      <button class="calc-toggle" id="toggle-${id}">
-        OPEN PROP CALCULATOR
-      </button>
+            <div class="metric-label">
+              JPRO PROJECTION
+            </div>
 
-      <div class="calculator" id="calc-${id}">
-        <div class="inputs">
-          <div class="field">
-            <label>SPORTSBOOK LINE</label>
-            <input
-              id="line-${id}"
-              type="number"
-              step=".5"
-              inputmode="decimal"
-              value="${defaultLine(prop)}"
-            >
+            <div class="metric-value">
+              ${
+                Number(
+                  prop.projection
+                ).toFixed(
+                  1
+                )
+              }
+            </div>
+
           </div>
 
-          <div class="field">
-            <label>AMERICAN ODDS</label>
-            <input
-              id="odds-${id}"
-              type="number"
-              step="1"
-              inputmode="numeric"
-              value="-110"
-            >
-          </div>
-        </div>
+          <div class="metric">
 
-        <div class="calc-results">
-          <div class="result-grid">
-            <div class="result">
-              <div class="result-title">OVER HIT RATE</div>
-              <div class="result-big" id="over-${id}">--</div>
-              <div class="result-small" id="overCount-${id}"></div>
+            <div class="metric-label">
+              20K MEDIAN
             </div>
 
-            <div class="result">
-              <div class="result-title">UNDER HIT RATE</div>
-              <div class="result-big" id="under-${id}">--</div>
-              <div class="result-small" id="underCount-${id}"></div>
+            <div class="metric-value">
+              ${
+                Number(
+                  prop.median
+                ).toFixed(
+                  1
+                )
+              }
             </div>
 
-            <div class="result">
-              <div class="result-title">OVER FAIR ODDS</div>
-              <div class="result-big" id="overFair-${id}">--</div>
-            </div>
-
-            <div class="result">
-              <div class="result-title">UNDER FAIR ODDS</div>
-              <div class="result-big" id="underFair-${id}">--</div>
-            </div>
           </div>
 
-          <div class="edge" id="edge-${id}"></div>
         </div>
-      </div>
-    `;
 
-    wrap.appendChild(card);
+        <div class="range">
+          20K RANGE
+          • P10 ${
+            Number.isFinite(
+              p10
+            )
+              ? p10.toFixed(1)
+              : "--"
+          }
+          · P25 ${
+            Number.isFinite(
+              p25
+            )
+              ? p25.toFixed(1)
+              : "--"
+          }
+          · P75 ${
+            Number.isFinite(
+              p75
+            )
+              ? p75.toFixed(1)
+              : "--"
+          }
+          · P90 ${
+            Number.isFinite(
+              p90
+            )
+              ? p90.toFixed(1)
+              : "--"
+          }
+        </div>
 
-    const toggle = document.getElementById(`toggle-${id}`);
-    const calc = document.getElementById(`calc-${id}`);
-    const lineInput = document.getElementById(`line-${id}`);
-    const oddsInput = document.getElementById(`odds-${id}`);
+        <button
+          class="calc-toggle"
+          id="toggle-${id}"
+        >
+          OPEN PROP CALCULATOR
+        </button>
 
-    toggle.addEventListener("click", () => {
-      calc.classList.toggle("open");
-      toggle.textContent = calc.classList.contains("open")
-        ? "CLOSE PROP CALCULATOR"
-        : "OPEN PROP CALCULATOR";
-    });
+        <div
+          class="calculator"
+          id="calc-${id}"
+        >
 
-    const recalc = () => calculateProp(prop, id);
-    lineInput.addEventListener("input", recalc);
-    oddsInput.addEventListener("input", recalc);
+          <div class="inputs">
 
-    calculateProp(prop, id);
-  });
+            <div class="field">
 
-  showScreen("player");
+              <label>
+                SPORTSBOOK LINE
+              </label>
+
+              <input
+                id="line-${id}"
+                type="number"
+                step=".5"
+                inputmode="decimal"
+                value="${defaultLine(prop)}"
+              >
+
+            </div>
+
+            <div class="field">
+
+              <label>
+                AMERICAN ODDS
+              </label>
+
+              <input
+                id="odds-${id}"
+                type="number"
+                step="1"
+                inputmode="numeric"
+                value="-110"
+              >
+
+            </div>
+
+          </div>
+
+          <div class="calc-results">
+
+            <div class="result-grid">
+
+              <div class="result">
+
+                <div class="result-title">
+                  OVER HIT RATE
+                </div>
+
+                <div
+                  class="result-big"
+                  id="over-${id}"
+                >
+                  --
+                </div>
+
+                <div
+                  class="result-small"
+                  id="overCount-${id}"
+                ></div>
+
+              </div>
+
+              <div class="result">
+
+                <div class="result-title">
+                  UNDER HIT RATE
+                </div>
+
+                <div
+                  class="result-big"
+                  id="under-${id}"
+                >
+                  --
+                </div>
+
+                <div
+                  class="result-small"
+                  id="underCount-${id}"
+                ></div>
+
+              </div>
+
+              <div class="result">
+
+                <div class="result-title">
+                  OVER FAIR ODDS
+                </div>
+
+                <div
+                  class="result-big"
+                  id="overFair-${id}"
+                >
+                  --
+                </div>
+
+              </div>
+
+              <div class="result">
+
+                <div class="result-title">
+                  UNDER FAIR ODDS
+                </div>
+
+                <div
+                  class="result-big"
+                  id="underFair-${id}"
+                >
+                  --
+                </div>
+
+              </div>
+
+            </div>
+
+            <div
+              class="edge"
+              id="edge-${id}"
+            ></div>
+
+          </div>
+
+        </div>
+      `;
+
+      wrap.appendChild(
+        card
+      );
+
+      const toggle =
+        document.getElementById(
+          `toggle-${id}`
+        );
+
+      const calc =
+        document.getElementById(
+          `calc-${id}`
+        );
+
+      const lineInput =
+        document.getElementById(
+          `line-${id}`
+        );
+
+      const oddsInput =
+        document.getElementById(
+          `odds-${id}`
+        );
+
+      toggle.addEventListener(
+        "click",
+        () => {
+
+          calc.classList.toggle(
+            "open"
+          );
+
+          toggle.textContent =
+            calc.classList.contains(
+              "open"
+            )
+              ? "CLOSE PROP CALCULATOR"
+              : "OPEN PROP CALCULATOR";
+        }
+      );
+
+      const recalc =
+        () =>
+          calculateProp(
+            prop,
+            id
+          );
+
+      lineInput.addEventListener(
+        "input",
+        recalc
+      );
+
+      oddsInput.addEventListener(
+        "input",
+        recalc
+      );
+
+      calculateProp(
+        prop,
+        id
+      );
+    }
+  );
+
+  showScreen(
+    "player"
+  );
 }
 
-function calculateProp(prop, id) {
-  const line = Number(document.getElementById(`line-${id}`).value);
-  const odds = Number(document.getElementById(`odds-${id}`).value);
-  const sims = prop.simulation_values;
+function calculateProp(
+  prop,
+  id
+) {
 
-  if (!Number.isFinite(line) || !Array.isArray(sims) || !sims.length) return;
+  const line =
+    Number(
+      document.getElementById(
+        `line-${id}`
+      ).value
+    );
+
+  const odds =
+    Number(
+      document.getElementById(
+        `odds-${id}`
+      ).value
+    );
+
+  if (
+    !Number.isFinite(
+      line
+    )
+  ) {
+
+    return;
+  }
 
   let over = 0;
   let under = 0;
   let pushes = 0;
+  let totalSims = 0;
 
-  sims.forEach(value => {
-    const n = Number(value);
-    if (n > line) over++;
-    else if (n < line) under++;
-    else pushes++;
-  });
+  /*
+    NEW FULL-SLATE FORMAT
 
-  const decisions = over + under;
-  if (!decisions) return;
+    [
+      [statValue, occurrenceCount],
+      ...
+    ]
 
-  const overP = over / decisions;
-  const underP = under / decisions;
-  const implied = impliedProbability(odds);
+    This is mathematically the same empirical
+    simulation distribution, but dramatically
+    smaller than storing 20,000 raw values.
+  */
 
-  document.getElementById(`over-${id}`).textContent = pct(overP);
-  document.getElementById(`under-${id}`).textContent = pct(underP);
+  if (
+    Array.isArray(
+      prop.simulation_histogram
+    ) &&
+    prop.simulation_histogram.length
+  ) {
 
-  document.getElementById(`overCount-${id}`).textContent =
-    `${over.toLocaleString()} / ${sims.length.toLocaleString()} sims`;
+    prop.simulation_histogram.forEach(
+      entry => {
 
-  document.getElementById(`underCount-${id}`).textContent =
-    `${under.toLocaleString()} / ${sims.length.toLocaleString()} sims`;
+        const value =
+          Number(
+            entry[0]
+          );
 
-  document.getElementById(`overFair-${id}`).textContent =
-    fairAmerican(overP);
+        const count =
+          Number(
+            entry[1]
+          );
 
-  document.getElementById(`underFair-${id}`).textContent =
-    fairAmerican(underP);
+        if (
+          !Number.isFinite(
+            value
+          ) ||
+          !Number.isFinite(
+            count
+          )
+        ) {
 
-  const edge = document.getElementById(`edge-${id}`);
+          return;
+        }
 
-  if (implied === null) {
-    edge.textContent = "Enter valid American odds to compare the price.";
+        totalSims +=
+          count;
+
+        if (
+          value > line
+        ) {
+
+          over +=
+            count;
+
+        } else if (
+          value < line
+        ) {
+
+          under +=
+            count;
+
+        } else {
+
+          pushes +=
+            count;
+        }
+      }
+    );
+  }
+
+  /*
+    BACKWARD COMPATIBILITY
+
+    Yesterday's NYG @ LA JSON still uses
+    simulation_values. This keeps the
+    current working engine functional.
+  */
+
+  else if (
+    Array.isArray(
+      prop.simulation_values
+    ) &&
+    prop.simulation_values.length
+  ) {
+
+    totalSims =
+      prop.simulation_values.length;
+
+    prop.simulation_values.forEach(
+      value => {
+
+        const n =
+          Number(
+            value
+          );
+
+        if (
+          n > line
+        ) {
+
+          over++;
+
+        } else if (
+          n < line
+        ) {
+
+          under++;
+
+        } else {
+
+          pushes++;
+        }
+      }
+    );
+
+  } else {
+
+    document.getElementById(
+      `edge-${id}`
+    ).textContent =
+      "Simulation distribution unavailable.";
+
     return;
   }
 
-  const overEdge = overP - implied;
-  const underEdge = underP - implied;
+  const decisions =
+    over +
+    under;
 
-  const side = overEdge >= underEdge ? "OVER" : "UNDER";
-  const best = Math.max(overEdge, underEdge);
-  const modelP = side === "OVER" ? overP : underP;
+  if (
+    !decisions
+  ) {
+
+    return;
+  }
+
+  /*
+    Pushes are excluded from the conditional
+    win probability for whole-number lines.
+  */
+
+  const overP =
+    over /
+    decisions;
+
+  const underP =
+    under /
+    decisions;
+
+  const implied =
+    impliedProbability(
+      odds
+    );
+
+  document.getElementById(
+    `over-${id}`
+  ).textContent =
+    pct(
+      overP
+    );
+
+  document.getElementById(
+    `under-${id}`
+  ).textContent =
+    pct(
+      underP
+    );
+
+  document.getElementById(
+    `overCount-${id}`
+  ).textContent =
+    `${over.toLocaleString()} / ` +
+    `${totalSims.toLocaleString()} sims`;
+
+  document.getElementById(
+    `underCount-${id}`
+  ).textContent =
+    `${under.toLocaleString()} / ` +
+    `${totalSims.toLocaleString()} sims`;
+
+  document.getElementById(
+    `overFair-${id}`
+  ).textContent =
+    fairAmerican(
+      overP
+    );
+
+  document.getElementById(
+    `underFair-${id}`
+  ).textContent =
+    fairAmerican(
+      underP
+    );
+
+  const edge =
+    document.getElementById(
+      `edge-${id}`
+    );
+
+  if (
+    implied === null
+  ) {
+
+    edge.textContent =
+      "Enter valid American odds to compare the price.";
+
+    return;
+  }
+
+  const overEdge =
+    overP -
+    implied;
+
+  const underEdge =
+    underP -
+    implied;
+
+  const side =
+    overEdge >= underEdge
+      ? "OVER"
+      : "UNDER";
+
+  const best =
+    Math.max(
+      overEdge,
+      underEdge
+    );
+
+  const modelP =
+    side === "OVER"
+      ? overP
+      : underP;
 
   edge.textContent =
-    `${side} • JPro ${pct(modelP)} vs sportsbook implied ${pct(implied)} ` +
-    `• probability difference ${best >= 0 ? "+" : ""}${(best * 100).toFixed(1)} pts` +
-    (pushes ? ` • ${pushes.toLocaleString()} pushes excluded` : "");
+    `${side} • JPro ${pct(modelP)} ` +
+    `vs sportsbook implied ${pct(implied)} ` +
+    `• probability difference ` +
+    `${best >= 0 ? "+" : ""}` +
+    `${(best * 100).toFixed(1)} pts` +
+    (
+      pushes
+        ? ` • ${pushes.toLocaleString()} pushes excluded`
+        : ""
+    );
 }
 
-document.getElementById("gameBack").addEventListener("click", () => {
-  showScreen("games");
-});
+document.getElementById(
+  "gameBack"
+).addEventListener(
+  "click",
+  () => {
 
-document.getElementById("playerBack").addEventListener("click", () => {
-  renderGame();
-});
+    showScreen(
+      "games"
+    );
+  }
+);
 
-document.querySelectorAll(".nav-btn").forEach(btn => {
-  btn.addEventListener("click", () => showScreen(btn.dataset.screen));
-});
+document.getElementById(
+  "playerBack"
+).addEventListener(
+  "click",
+  () => {
+
+    renderGame(
+      currentGame
+    );
+  }
+);
+
+document.querySelectorAll(
+  ".nav-btn"
+).forEach(
+  btn => {
+
+    btn.addEventListener(
+      "click",
+      () =>
+        showScreen(
+          btn.dataset.screen
+        )
+    );
+  }
+);
 
 async function loadJPro() {
+
   try {
-    const response = await fetch(DATA_URL, { cache: "no-store" });
 
-    if (!response.ok) {
-      throw new Error("JPro data unavailable");
+    const response =
+      await fetch(
+        DATA_URL,
+        {
+          cache:
+            "no-store"
+        }
+      );
+
+    if (
+      !response.ok
+    ) {
+
+      throw new Error(
+        "JPro data unavailable"
+      );
     }
 
-    jproData = await response.json();
+    jproData =
+      await response.json();
 
-    if (!Array.isArray(jproData.projections) || !jproData.projections.length) {
-      throw new Error("No projections found");
+    if (
+      !Array.isArray(
+        jproData.projections
+      ) ||
+      !jproData.projections.length
+    ) {
+
+      throw new Error(
+        "No projections found"
+      );
     }
 
-    players = groupPlayers(jproData.projections);
+    players =
+      groupPlayers(
+        jproData.projections
+      );
+
     renderHome();
 
-  } catch (error) {
-    console.error(error);
+  } catch (
+    error
+  ) {
 
-    document.getElementById("gamesList").innerHTML = `
+    console.error(
+      error
+    );
+
+    document.getElementById(
+      "gamesList"
+    ).innerHTML = `
       <div class="status">
-        JPro couldn't load the simulation file. Refresh after the latest
-        engine run has finished.
+        JPro couldn't load the simulation file.
+        Refresh after the latest engine run
+        has finished.
       </div>
     `;
   }
@@ -628,11 +2012,25 @@ async function loadJPro() {
 
 loadJPro();
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {});
-  });
+if (
+  "serviceWorker" in navigator
+) {
+
+  window.addEventListener(
+    "load",
+    () => {
+
+      navigator.serviceWorker
+        .register(
+          "./sw.js"
+        )
+        .catch(
+          () => {}
+        );
+    }
+  );
 }
+
 </script>
 
 </body>
