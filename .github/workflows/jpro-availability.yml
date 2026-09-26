@@ -1,0 +1,1170 @@
+name: JPro Availability Engine V1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  availability-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get JPro
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Availability Engine
+        run: |
+          python -m pip install --upgrade pip
+          pip install nflreadpy polars pyarrow
+
+      - name: Build Current Roster and Availability V1
+        run: |
+          python <<'PY'
+          import json
+          import os
+          import math
+          from collections import Counter
+
+          import nflreadpy as nfl
+          import polars as pl
+
+
+          SEASON = 2026
+          OUTPUT = "data/jpro-availability.json"
+
+          print("=" * 78)
+          print("JPRO CURRENT ROSTER + AVAILABILITY ENGINE V1")
+          print("=" * 78)
+
+
+          def to_pl(data):
+              if isinstance(data, pl.DataFrame):
+                  return data
+              return pl.DataFrame(data)
+
+
+          def first_col(columns, choices):
+              for c in choices:
+                  if c in columns:
+                      return c
+              return None
+
+
+          def clean(v):
+              if v is None:
+                  return None
+
+              try:
+                  if isinstance(v, float) and math.isnan(v):
+                      return None
+              except Exception:
+                  pass
+
+              return v
+
+
+          def text(v):
+              v = clean(v)
+
+              if v is None:
+                  return ""
+
+              return str(v).strip()
+
+
+          def upper(v):
+              return text(v).upper()
+
+
+          def load_optional(label, fn):
+              print("")
+              print("Loading", label, "...")
+
+              try:
+                  frame = to_pl(fn())
+
+                  print(
+                      label,
+                      "rows:",
+                      frame.height,
+                      "| columns:",
+                      len(frame.columns)
+                  )
+
+                  return frame
+
+              except Exception as exc:
+                  print(
+                      "WARNING:",
+                      label,
+                      "could not be loaded:"
+                  )
+                  print(str(exc))
+
+                  return pl.DataFrame()
+
+
+          # ==========================================================
+          # LOAD SOURCES
+          # ==========================================================
+
+          rosters = load_optional(
+              "2026 season rosters",
+              lambda: nfl.load_rosters([SEASON])
+          )
+
+          weekly = load_optional(
+              "2026 weekly rosters",
+              lambda: nfl.load_rosters_weekly([SEASON])
+          )
+
+          injuries = load_optional(
+              "2026 injuries",
+              lambda: nfl.load_injuries([SEASON])
+          )
+
+          depth = load_optional(
+              "2026 depth charts",
+              lambda: nfl.load_depth_charts([SEASON])
+          )
+
+
+          if rosters.height == 0:
+              raise RuntimeError(
+                  "Current season roster data did not load."
+              )
+
+
+          # ==========================================================
+          # SCHEMA AUDIT
+          # ==========================================================
+
+          print("")
+          print("=" * 78)
+          print("ROSTER SCHEMA")
+          print("=" * 78)
+
+          print(rosters.columns)
+
+          print("")
+          print("=" * 78)
+          print("WEEKLY ROSTER SCHEMA")
+          print("=" * 78)
+
+          print(weekly.columns)
+
+          print("")
+          print("=" * 78)
+          print("INJURY SCHEMA")
+          print("=" * 78)
+
+          print(injuries.columns)
+
+          print("")
+          print("=" * 78)
+          print("DEPTH CHART SCHEMA")
+          print("=" * 78)
+
+          print(depth.columns)
+
+
+          # ==========================================================
+          # ROSTER COLUMN DETECTION
+          # ==========================================================
+
+          roster_cols = set(rosters.columns)
+
+          r_id = first_col(
+              roster_cols,
+              [
+                  "gsis_id",
+                  "player_id",
+                  "player_gsis_id"
+              ]
+          )
+
+          r_name = first_col(
+              roster_cols,
+              [
+                  "full_name",
+                  "player_name",
+                  "player_display_name",
+                  "football_name"
+              ]
+          )
+
+          r_team = first_col(
+              roster_cols,
+              [
+                  "team",
+                  "team_abbr",
+                  "recent_team",
+                  "club"
+              ]
+          )
+
+          r_pos = first_col(
+              roster_cols,
+              [
+                  "position",
+                  "position_group"
+              ]
+          )
+
+          r_status = first_col(
+              roster_cols,
+              [
+                  "status",
+                  "roster_status"
+              ]
+          )
+
+
+          required = {
+              "player_id": r_id,
+              "player_name": r_name,
+              "team": r_team,
+              "position": r_pos
+          }
+
+          missing = [
+              k
+              for k, v in required.items()
+              if v is None
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "Unable to detect roster fields: "
+                  + ", ".join(missing)
+              )
+
+
+          print("")
+          print("=" * 78)
+          print("DETECTED CURRENT ROSTER SCHEMA")
+          print("=" * 78)
+
+          print("Player ID:", r_id)
+          print("Player name:", r_name)
+          print("Team:", r_team)
+          print("Position:", r_pos)
+          print("Roster status:", r_status)
+
+
+          # ==========================================================
+          # GENERIC LATEST-ROW HELPER
+          # ==========================================================
+
+          def latest_by_player(frame):
+              if frame.height == 0:
+                  return {}
+
+              cols = set(frame.columns)
+
+              pid = first_col(
+                  cols,
+                  [
+                      "gsis_id",
+                      "player_id",
+                      "player_gsis_id"
+                  ]
+              )
+
+              if pid is None:
+                  return {}
+
+              season_col = first_col(
+                  cols,
+                  ["season"]
+              )
+
+              week_col = first_col(
+                  cols,
+                  [
+                      "week",
+                      "week_number"
+                  ]
+              )
+
+              rows = frame.to_dicts()
+
+              result = {}
+
+              for row in rows:
+                  player_id = text(
+                      row.get(pid)
+                  )
+
+                  if not player_id:
+                      continue
+
+                  season = 0
+                  week = 0
+
+                  try:
+                      season = int(
+                          float(
+                              row.get(
+                                  season_col,
+                                  0
+                              )
+                              or 0
+                          )
+                      )
+                  except Exception:
+                      pass
+
+                  try:
+                      week = int(
+                          float(
+                              row.get(
+                                  week_col,
+                                  0
+                              )
+                              or 0
+                          )
+                      )
+                  except Exception:
+                      pass
+
+                  order = (
+                      season,
+                      week
+                  )
+
+                  existing = result.get(
+                      player_id
+                  )
+
+                  if (
+                      existing is None
+                      or order
+                      >= existing["_order"]
+                  ):
+                      result[player_id] = {
+                          "_order": order,
+                          "row": row
+                      }
+
+              return {
+                  pid: item["row"]
+                  for pid, item
+                  in result.items()
+              }
+
+
+          weekly_latest = latest_by_player(
+              weekly
+          )
+
+          injury_latest = latest_by_player(
+              injuries
+          )
+
+          depth_latest = latest_by_player(
+              depth
+          )
+
+
+          # ==========================================================
+          # STATUS EXTRACTION
+          # ==========================================================
+
+          def value_from(
+              row,
+              choices
+          ):
+              if not row:
+                  return None
+
+              for c in choices:
+                  if c in row:
+                      value = clean(
+                          row.get(c)
+                      )
+
+                      if value not in [
+                          None,
+                          ""
+                      ]:
+                          return value
+
+              return None
+
+
+          def derive_availability(
+              roster_status,
+              weekly_status,
+              injury_status,
+              practice_status
+          ):
+
+              combined = " ".join(
+                  [
+                      upper(roster_status),
+                      upper(weekly_status),
+                      upper(injury_status),
+                      upper(practice_status)
+                  ]
+              )
+
+
+              hard_out_terms = [
+                  "OUT",
+                  "INACTIVE",
+                  "RESERVE/INJURED",
+                  "INJURED RESERVE",
+                  "IR",
+                  "PUP",
+                  "SUSPENDED"
+              ]
+
+
+              doubtful_terms = [
+                  "DOUBTFUL"
+              ]
+
+
+              questionable_terms = [
+                  "QUESTIONABLE"
+              ]
+
+
+              if any(
+                  term in combined
+                  for term in hard_out_terms
+              ):
+                  return (
+                      "UNAVAILABLE",
+                      "HIGH"
+                  )
+
+
+              if any(
+                  term in combined
+                  for term in doubtful_terms
+              ):
+                  return (
+                      "DOUBTFUL",
+                      "MEDIUM"
+                  )
+
+
+              if any(
+                  term in combined
+                  for term in questionable_terms
+              ):
+                  return (
+                      "QUESTIONABLE",
+                      "MEDIUM"
+                  )
+
+
+              # No injury designation is NOT the same
+              # thing as a guaranteed active game status.
+
+              return (
+                  "NO_OUT_DESIGNATION_FOUND",
+                  "LOW"
+              )
+
+
+          # ==========================================================
+          # BUILD CURRENT PLAYER DATABASE
+          # ==========================================================
+
+          roster_rows = rosters.to_dicts()
+
+          players = []
+
+
+          for row in roster_rows:
+
+              player_id = text(
+                  row.get(r_id)
+              )
+
+              player_name = text(
+                  row.get(r_name)
+              )
+
+              team = upper(
+                  row.get(r_team)
+              )
+
+              position = upper(
+                  row.get(r_pos)
+              )
+
+
+              if not player_id:
+                  continue
+
+              if not player_name:
+                  continue
+
+              if not team:
+                  continue
+
+
+              weekly_row = weekly_latest.get(
+                  player_id,
+                  {}
+              )
+
+              injury_row = injury_latest.get(
+                  player_id,
+                  {}
+              )
+
+              depth_row = depth_latest.get(
+                  player_id,
+                  {}
+              )
+
+
+              roster_status = (
+                  row.get(r_status)
+                  if r_status
+                  else None
+              )
+
+
+              weekly_status = value_from(
+                  weekly_row,
+                  [
+                      "status",
+                      "roster_status",
+                      "game_status"
+                  ]
+              )
+
+
+              injury_status = value_from(
+                  injury_row,
+                  [
+                      "report_status",
+                      "game_status",
+                      "status",
+                      "injury_status"
+                  ]
+              )
+
+
+              practice_status = value_from(
+                  injury_row,
+                  [
+                      "practice_status",
+                      "practice_participation"
+                  ]
+              )
+
+
+              injury_type = value_from(
+                  injury_row,
+                  [
+                      "report_primary_injury",
+                      "primary_injury",
+                      "injury",
+                      "injury_type"
+                  ]
+              )
+
+
+              depth_position = value_from(
+                  depth_row,
+                  [
+                      "pos_name",
+                      "position",
+                      "pos_abb"
+                  ]
+              )
+
+
+              depth_rank = value_from(
+                  depth_row,
+                  [
+                      "pos_rank",
+                      "depth_team",
+                      "depth_position",
+                      "rank"
+                  ]
+              )
+
+
+              availability, confidence = (
+                  derive_availability(
+                      roster_status,
+                      weekly_status,
+                      injury_status,
+                      practice_status
+                  )
+              )
+
+
+              players.append(
+                  {
+                      "player_id":
+                          player_id,
+
+                      "player":
+                          player_name,
+
+                      "team":
+                          team,
+
+                      "position":
+                          position,
+
+                      "roster_status":
+                          clean(
+                              roster_status
+                          ),
+
+                      "weekly_roster_status":
+                          clean(
+                              weekly_status
+                          ),
+
+                      "injury_status":
+                          clean(
+                              injury_status
+                          ),
+
+                      "practice_status":
+                          clean(
+                              practice_status
+                          ),
+
+                      "injury":
+                          clean(
+                              injury_type
+                          ),
+
+                      "depth_position":
+                          clean(
+                              depth_position
+                          ),
+
+                      "depth_rank":
+                          clean(
+                              depth_rank
+                          ),
+
+                      "availability":
+                          availability,
+
+                      "availability_confidence":
+                          confidence
+                  }
+              )
+
+
+          # ==========================================================
+          # CURRENT ROSTER DEDUPLICATION
+          #
+          # Keep one current record per player ID.
+          # ==========================================================
+
+          unique = {}
+
+          for player in players:
+
+              player_id = player[
+                  "player_id"
+              ]
+
+              existing = unique.get(
+                  player_id
+              )
+
+              if existing is None:
+                  unique[player_id] = player
+                  continue
+
+              # Prefer the row with more current
+              # weekly/injury/depth information.
+
+              existing_info = sum(
+                  existing.get(k)
+                  not in [
+                      None,
+                      ""
+                  ]
+                  for k in [
+                      "weekly_roster_status",
+                      "injury_status",
+                      "practice_status",
+                      "depth_rank"
+                  ]
+              )
+
+              new_info = sum(
+                  player.get(k)
+                  not in [
+                      None,
+                      ""
+                  ]
+                  for k in [
+                      "weekly_roster_status",
+                      "injury_status",
+                      "practice_status",
+                      "depth_rank"
+                  ]
+              )
+
+              if new_info >= existing_info:
+                  unique[player_id] = player
+
+
+          players = list(
+              unique.values()
+          )
+
+
+          players.sort(
+              key=lambda p: (
+                  p["team"],
+                  p["position"],
+                  p["player"]
+              )
+          )
+
+
+          # ==========================================================
+          # SUMMARY
+          # ==========================================================
+
+          teams = sorted(
+              set(
+                  p["team"]
+                  for p in players
+              )
+          )
+
+          availability_counts = Counter(
+              p["availability"]
+              for p in players
+          )
+
+
+          skill_players = [
+              p
+              for p in players
+              if p["position"]
+              in {
+                  "QB",
+                  "RB",
+                  "WR",
+                  "TE"
+              }
+          ]
+
+
+          unavailable_skill = [
+              p
+              for p in skill_players
+              if p["availability"]
+              == "UNAVAILABLE"
+          ]
+
+
+          questionable_skill = [
+              p
+              for p in skill_players
+              if p["availability"]
+              in {
+                  "QUESTIONABLE",
+                  "DOUBTFUL"
+              }
+          ]
+
+
+          output = {
+              "engine":
+                  "JPRO_AVAILABILITY_V1",
+
+              "status":
+                  "AUDIT_READY",
+
+              "season":
+                  SEASON,
+
+              "method":
+                  (
+                      "NFLVERSE_ROSTER_WEEKLY_ROSTER_"
+                      "INJURY_DEPTH_CHART_FUSION"
+                  ),
+
+              "important_limitations": [
+                  (
+                      "This V1 layer is an availability audit "
+                      "and does not modify projections."
+                  ),
+                  (
+                      "NO_OUT_DESIGNATION_FOUND does not "
+                      "guarantee a player will be active."
+                  ),
+                  (
+                      "Official game-day inactive information "
+                      "can arrive close to kickoff."
+                  ),
+                  (
+                      "Questionable and doubtful players are "
+                      "not automatically treated as zero usage."
+                  )
+              ],
+
+              "sources": {
+                  "season_rosters":
+                      rosters.height,
+
+                  "weekly_rosters":
+                      weekly.height,
+
+                  "injuries":
+                      injuries.height,
+
+                  "depth_charts":
+                      depth.height
+              },
+
+              "summary": {
+                  "teams":
+                      len(teams),
+
+                  "players":
+                      len(players),
+
+                  "skill_players":
+                      len(skill_players),
+
+                  "unavailable_skill_players":
+                      len(unavailable_skill),
+
+                  "questionable_or_doubtful_skill_players":
+                      len(questionable_skill),
+
+                  "availability_counts":
+                      dict(
+                          availability_counts
+                      )
+              },
+
+              "players":
+                  players
+          }
+
+
+          os.makedirs(
+              "data",
+              exist_ok=True
+          )
+
+          with open(
+              OUTPUT,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  output,
+                  f,
+                  separators=(",", ":")
+              )
+
+
+          # ==========================================================
+          # PRINT AUDIT
+          # ==========================================================
+
+          print("")
+          print("=" * 78)
+          print("CURRENT 2026 ROSTER AUDIT")
+          print("=" * 78)
+
+          print("Teams:", len(teams))
+          print("Players:", len(players))
+          print("Skill players:", len(skill_players))
+
+          print("")
+          print(
+              "Availability counts:",
+              dict(availability_counts)
+          )
+
+
+          print("")
+          print("=" * 78)
+          print("UNAVAILABLE SKILL PLAYERS")
+          print("=" * 78)
+
+          for p in unavailable_skill:
+
+              print("")
+              print(
+                  p["team"],
+                  "|",
+                  p["player"],
+                  "|",
+                  p["position"]
+              )
+
+              print(
+                  "   ROSTER:",
+                  p["roster_status"]
+              )
+
+              print(
+                  "   WEEKLY:",
+                  p["weekly_roster_status"]
+              )
+
+              print(
+                  "   INJURY STATUS:",
+                  p["injury_status"]
+              )
+
+              print(
+                  "   INJURY:",
+                  p["injury"]
+              )
+
+              print(
+                  "   DEPTH:",
+                  p["depth_rank"]
+              )
+
+
+          print("")
+          print("=" * 78)
+          print("QUESTIONABLE / DOUBTFUL SKILL PLAYERS")
+          print("=" * 78)
+
+          for p in questionable_skill:
+
+              print("")
+              print(
+                  p["team"],
+                  "|",
+                  p["player"],
+                  "|",
+                  p["position"]
+              )
+
+              print(
+                  "   STATUS:",
+                  p["availability"]
+              )
+
+              print(
+                  "   INJURY:",
+                  p["injury"]
+              )
+
+              print(
+                  "   PRACTICE:",
+                  p["practice_status"]
+              )
+
+              print(
+                  "   DEPTH:",
+                  p["depth_rank"]
+              )
+
+
+          print("")
+          print("=" * 78)
+          print("CURRENT SKILL ROSTER PREVIEW")
+          print("=" * 78)
+
+          for p in skill_players[:100]:
+
+              print(
+                  p["team"],
+                  "|",
+                  p["player"],
+                  "|",
+                  p["position"],
+                  "|",
+                  p["availability"],
+                  "| DEPTH:",
+                  p["depth_rank"]
+              )
+
+
+          print("")
+          print("Saved:", OUTPUT)
+
+          PY
+
+      - name: Verify Current Roster and Availability V1
+        run: |
+          python <<'PY'
+          import json
+
+
+          PATH = "data/jpro-availability.json"
+
+
+          with open(
+              PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+
+          print("=" * 78)
+          print("VERIFY JPRO AVAILABILITY V1")
+          print("=" * 78)
+
+
+          if (
+              data.get("engine")
+              != "JPRO_AVAILABILITY_V1"
+          ):
+              raise RuntimeError(
+                  "Wrong engine version."
+              )
+
+
+          if (
+              data.get("status")
+              != "AUDIT_READY"
+          ):
+              raise RuntimeError(
+                  "Availability engine not audit ready."
+              )
+
+
+          players = data.get(
+              "players",
+              []
+          )
+
+
+          if not players:
+              raise RuntimeError(
+                  "No current roster players."
+              )
+
+
+          teams = set(
+              p.get("team")
+              for p in players
+              if p.get("team")
+          )
+
+
+          if len(teams) < 30:
+              raise RuntimeError(
+                  "Current roster team coverage is too low."
+              )
+
+
+          ids = [
+              p.get("player_id")
+              for p in players
+          ]
+
+
+          if len(ids) != len(set(ids)):
+              raise RuntimeError(
+                  "Duplicate current player IDs remain."
+              )
+
+
+          valid = {
+              "UNAVAILABLE",
+              "DOUBTFUL",
+              "QUESTIONABLE",
+              "NO_OUT_DESIGNATION_FOUND"
+          }
+
+
+          bad = [
+              p
+              for p in players
+              if p.get("availability")
+              not in valid
+          ]
+
+
+          if bad:
+              raise RuntimeError(
+                  "Invalid availability classification."
+              )
+
+
+          summary = data.get(
+              "summary",
+              {}
+          )
+
+
+          print(
+              "Teams:",
+              summary.get("teams")
+          )
+
+          print(
+              "Players:",
+              summary.get("players")
+          )
+
+          print(
+              "Skill players:",
+              summary.get(
+                  "skill_players"
+              )
+          )
+
+          print(
+              "Unavailable skill:",
+              summary.get(
+                  "unavailable_skill_players"
+              )
+          )
+
+          print(
+              "Questionable/doubtful skill:",
+              summary.get(
+                  "questionable_or_doubtful_skill_players"
+              )
+          )
+
+
+          print("")
+          print("=" * 78)
+          print("JPRO AVAILABILITY V1 VERIFIED")
+          print("=" * 78)
+
+          print(
+              "NO PROJECTIONS WERE MODIFIED."
+          )
+
+          PY
+
+      - name: Save Availability Audit
+        run: |
+          git config user.name "JPro Cloud Engine"
+          git config user.email "actions@github.com"
+
+          git add data/jpro-availability.json
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit \
+              -m "Add JPro current roster availability audit"
+
+            git push
+          fi
