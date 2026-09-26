@@ -4,17 +4,13 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   jpro-engine:
     runs-on: ubuntu-latest
 
     steps:
-      # ============================================================
-      # GET JPRO
-      # ============================================================
-
       - name: Get JPro
         uses: actions/checkout@v4
 
@@ -24,535 +20,1369 @@ jobs:
           python-version: "3.11"
 
       # ============================================================
-      # INSPECT CURRENT JPRO DATA STRUCTURE
+      # JPRO PICKS ENGINE V1
       #
-      # READ ONLY.
-      # DOES NOT MODIFY OR SAVE ANYTHING.
+      # Uses the VERIFIED Market Engine structure:
+      #
+      # market.model_reference_line
+      # market.model_reference_lean
+      # market.model_reference_probability
+      # market.line_ladder
+      #
+      # IMPORTANT:
+      # model_reference_line is an internal JPro reference.
+      # It is NOT a real sportsbook line.
       # ============================================================
 
-      - name: Inspect JPro Market Data
+      - name: Build JPro Picks Engine V1
         run: |
           python <<'PY'
           import json
+          import math
           import os
-          from pprint import pprint
 
           PATH = "data/jpro-current-projections.json"
+          EXPECTED_SIMS = 20000
 
-          print("=" * 80)
-          print("JPRO MARKET DATA DIAGNOSTIC")
-          print("=" * 80)
+          print("=" * 72)
+          print("JPRO PICKS ENGINE V1")
+          print("=" * 72)
+
+          # --------------------------------------------------------
+          # LOAD DATA
+          # --------------------------------------------------------
 
           if not os.path.exists(PATH):
               raise RuntimeError(
                   f"Missing required file: {PATH}"
               )
 
-          with open(
-              PATH,
-              "r",
-              encoding="utf-8"
-          ) as file:
-              data = json.load(file)
+          with open(PATH, "r", encoding="utf-8") as f:
+              data = json.load(f)
 
-          print("")
-          print("TOP LEVEL KEYS:")
-          print(sorted(data.keys()))
-
-          projections = data.get(
-              "projections",
-              []
-          )
-
-          print("")
-          print(
-              "PROJECTIONS:",
-              len(projections)
-          )
+          projections = data.get("projections", [])
 
           if not projections:
               raise RuntimeError(
                   "No projections found."
               )
 
-          # ========================================================
-          # FIRST PROJECTION STRUCTURE
-          # ========================================================
+          print("Projections loaded:", len(projections))
 
-          first = projections[0]
+          # --------------------------------------------------------
+          # HELPERS
+          # --------------------------------------------------------
 
-          print("")
-          print("=" * 80)
-          print("FIRST PROJECTION KEYS")
-          print("=" * 80)
+          def num(value, default=0.0):
+              try:
+                  value = float(value)
 
-          print(
-              sorted(
-                  first.keys()
+                  if math.isnan(value) or math.isinf(value):
+                      return default
+
+                  return value
+              except Exception:
+                  return default
+
+
+          def clamp(value, low, high):
+              return max(
+                  low,
+                  min(high, value)
               )
-          )
 
-          # ========================================================
-          # FIND MARKET-RELATED KEYS ACROSS PROJECTIONS
-          # ========================================================
 
-          market_keys = set()
+          def fair_american(probability):
+              p = num(probability)
+
+              if p <= 0 or p >= 1:
+                  return None
+
+              if p >= 0.5:
+                  odds = -100 * p / (1 - p)
+              else:
+                  odds = 100 * (1 - p) / p
+
+              return int(round(odds))
+
+
+          def histogram_total(histogram):
+              total = 0
+
+              for row in histogram:
+                  if (
+                      isinstance(row, list)
+                      and len(row) >= 2
+                  ):
+                      total += int(row[1])
+
+              return total
+
+
+          def probabilities_at_line(histogram, line):
+              total = histogram_total(histogram)
+
+              if total != EXPECTED_SIMS:
+                  raise RuntimeError(
+                      f"Expected {EXPECTED_SIMS} simulations, "
+                      f"found {total}."
+                  )
+
+              over = 0
+              under = 0
+              push = 0
+
+              for row in histogram:
+                  value = float(row[0])
+                  count = int(row[1])
+
+                  if value > line:
+                      over += count
+                  elif value < line:
+                      under += count
+                  else:
+                      push += count
+
+              return {
+                  "over": over / total,
+                  "under": under / total,
+                  "push": push / total
+              }
+
+
+          # --------------------------------------------------------
+          # VERIFIED MARKET ENGINE ACCESS
+          # --------------------------------------------------------
+
+          def get_market(prop):
+              market = prop.get("market", {})
+
+              if not isinstance(market, dict):
+                  return {}
+
+              return market
+
+
+          def get_reference_line(prop):
+              market = get_market(prop)
+
+              line = market.get(
+                  "model_reference_line"
+              )
+
+              if line is None:
+                  return None
+
+              try:
+                  return float(line)
+              except Exception:
+                  return None
+
+
+          # --------------------------------------------------------
+          # ROLE V2 ACCESS
+          # --------------------------------------------------------
+
+          def get_role(prop):
+              role = prop.get("role", {})
+
+              if not isinstance(role, dict):
+                  role = {}
+
+              return {
+                  "score": num(
+                      role.get("role_score"),
+                      50
+                  ),
+                  "label": role.get(
+                      "role_label",
+                      "UNKNOWN"
+                  ),
+                  "method": role.get(
+                      "role_method",
+                      ""
+                  ),
+                  "current_games": num(
+                      role.get("current_games"),
+                      0
+                  )
+              }
+
+
+          # --------------------------------------------------------
+          # MATCHUP ACCESS
+          # --------------------------------------------------------
+
+          def get_matchup(prop):
+              matchup = prop.get(
+                  "matchup",
+                  {}
+              )
+
+              if not isinstance(matchup, dict):
+                  matchup = {}
+
+              return {
+                  "score": num(
+                      matchup.get("matchup_score"),
+                      50
+                  ),
+                  "label": matchup.get(
+                      "matchup_label",
+                      "NEUTRAL"
+                  )
+              }
+
+
+          # --------------------------------------------------------
+          # BUILD ONE CANDIDATE
+          # --------------------------------------------------------
+
+          def build_candidate(
+              prop,
+              line,
+              probs
+          ):
+              role = get_role(prop)
+              matchup = get_matchup(prop)
+              market = get_market(prop)
+
+              projection = num(
+                  prop.get("projection")
+              )
+
+              median = num(
+                  prop.get("median")
+              )
+
+              p25 = num(
+                  prop.get("p25")
+              )
+
+              p75 = num(
+                  prop.get("p75")
+              )
+
+              # Choose stronger simulation side.
+              if probs["over"] >= probs["under"]:
+                  side = "OVER"
+                  probability = probs["over"]
+              else:
+                  side = "UNDER"
+                  probability = probs["under"]
+
+              # Directional matchup support.
+              if side == "OVER":
+                  matchup_support = (
+                      matchup["score"] - 50
+                  )
+              else:
+                  matchup_support = (
+                      50 - matchup["score"]
+                  )
+
+              # Distribution stability.
+              iqr = max(
+                  p75 - p25,
+                  0
+              )
+
+              if median > 0:
+                  relative_spread = iqr / median
+              else:
+                  relative_spread = 0
+
+              stability = clamp(
+                  100 - relative_spread * 25,
+                  0,
+                  100
+              )
+
+              # Ranking score only.
+              # NOT a win probability.
+              candidate_score = (
+                  probability * 100 * 0.65
+                  + role["score"] * 0.20
+                  + clamp(
+                      50 + matchup_support,
+                      0,
+                      100
+                  ) * 0.10
+                  + stability * 0.05
+              )
+
+              candidate_score = clamp(
+                  candidate_score,
+                  0,
+                  100
+              )
+
+              # Screening buckets.
+              # These organize the watchlist only.
+              if (
+                  probability >= 0.65
+                  and role["score"] >= 65
+              ):
+                  screening_status = "HIGH_PRIORITY"
+
+              elif (
+                  probability >= 0.60
+                  and role["score"] >= 55
+              ):
+                  screening_status = "REVIEW"
+
+              else:
+                  screening_status = "WATCH"
+
+              # Projection distance.
+              if side == "OVER":
+                  projection_distance = (
+                      projection - line
+                  )
+              else:
+                  projection_distance = (
+                      line - projection
+                  )
+
+              reasons = [
+                  (
+                      "20K simulation probability: "
+                      + str(
+                          round(
+                              probability * 100,
+                              1
+                          )
+                      )
+                      + "%"
+                  )
+              ]
+
+              if role["score"] >= 80:
+                  reasons.append(
+                      "Featured opportunity profile"
+                  )
+
+              elif role["score"] >= 65:
+                  reasons.append(
+                      "Strong expected opportunity"
+                  )
+
+              elif role["score"] >= 50:
+                  reasons.append(
+                      "Stable expected opportunity"
+                  )
+
+              else:
+                  reasons.append(
+                      "Expected opportunity below stable range"
+                  )
+
+              if (
+                  side == "OVER"
+                  and matchup["score"] >= 65
+              ):
+                  reasons.append(
+                      "Opponent production matchup supports over direction"
+                  )
+
+              elif (
+                  side == "UNDER"
+                  and matchup["score"] <= 35
+              ):
+                  reasons.append(
+                      "Opponent production matchup supports under direction"
+                  )
+
+              elif (
+                  side == "OVER"
+                  and matchup["score"] <= 35
+              ):
+                  reasons.append(
+                      "Opponent production matchup resists over direction"
+                  )
+
+              elif (
+                  side == "UNDER"
+                  and matchup["score"] >= 65
+              ):
+                  reasons.append(
+                      "Opponent production matchup resists under direction"
+                  )
+
+              reasons.append(
+                  (
+                      "Projection distance from reference: "
+                      + str(
+                          round(
+                              projection_distance,
+                              2
+                          )
+                      )
+                  )
+              )
+
+              risks = []
+
+              if role["current_games"] <= 2:
+                  risks.append(
+                      "Current-season sample is limited"
+                  )
+
+              if (
+                  median > 0
+                  and relative_spread >= 0.75
+              ):
+                  risks.append(
+                      "Simulation distribution is relatively wide"
+                  )
+
+              if (
+                  side == "OVER"
+                  and role["score"] < 50
+              ):
+                  risks.append(
+                      "Expected opportunity is below stable range"
+                  )
+
+              if (
+                  side == "OVER"
+                  and matchup["score"] <= 35
+              ):
+                  risks.append(
+                      "Opponent production matchup is difficult"
+                  )
+
+              if (
+                  side == "UNDER"
+                  and matchup["score"] >= 65
+              ):
+                  risks.append(
+                      "Opponent production matchup favors offense"
+                  )
+
+              if not risks:
+                  risks.append(
+                      "Usage, injuries and game script remain uncertain"
+                  )
+
+              return {
+                  "game": prop.get("game"),
+                  "team": prop.get("team"),
+                  "opponent": prop.get("opponent"),
+                  "player_id": prop.get("player_id"),
+                  "player": prop.get("player"),
+                  "position": prop.get("position"),
+                  "prop": prop.get("prop"),
+
+                  "side": side,
+
+                  "model_reference_line": line,
+                  "reference_line_type": "MODEL_REFERENCE",
+
+                  "projection": round(
+                      projection,
+                      2
+                  ),
+
+                  "median": round(
+                      median,
+                      2
+                  ),
+
+                  "over_probability": round(
+                      probs["over"],
+                      4
+                  ),
+
+                  "under_probability": round(
+                      probs["under"],
+                      4
+                  ),
+
+                  "push_probability": round(
+                      probs["push"],
+                      4
+                  ),
+
+                  "model_probability": round(
+                      probability,
+                      4
+                  ),
+
+                  "model_probability_pct": round(
+                      probability * 100,
+                      1
+                  ),
+
+                  "fair_odds": fair_american(
+                      probability
+                  ),
+
+                  "role_score": round(
+                      role["score"],
+                      2
+                  ),
+
+                  "role_label": role["label"],
+                  "role_method": role["method"],
+
+                  "matchup_score": round(
+                      matchup["score"],
+                      2
+                  ),
+
+                  "matchup_label": matchup["label"],
+
+                  "distribution_stability_score": round(
+                      stability,
+                      2
+                  ),
+
+                  "candidate_score": round(
+                      candidate_score,
+                      2
+                  ),
+
+                  "screening_status": screening_status,
+
+                  "market_engine_reference_lean":
+                      market.get(
+                          "model_reference_lean"
+                      ),
+
+                  "market_engine_reference_probability":
+                      market.get(
+                          "model_reference_probability"
+                      ),
+
+                  # REAL MARKET DATA IS INTENTIONALLY EMPTY.
+                  "sportsbook": None,
+                  "sportsbook_line": None,
+                  "sportsbook_odds": None,
+                  "sportsbook_implied_probability": None,
+                  "model_edge": None,
+                  "qualified_pick": False,
+
+                  "status":
+                      "AWAITING_SPORTSBOOK_PRICE",
+
+                  "reasons": reasons,
+                  "risk_factors": risks
+              }
+
+
+          # --------------------------------------------------------
+          # PROCESS ALL PROJECTIONS
+          # --------------------------------------------------------
+
+          candidates = []
+
+          processed = 0
+          skipped_no_histogram = 0
+          skipped_no_market = 0
+          skipped_no_reference_line = 0
 
           for prop in projections:
-
-              for key in prop.keys():
-
-                  key_lower = str(
-                      key
-                  ).lower()
-
-                  if any(
-                      word in key_lower
-                      for word in [
-                          "market",
-                          "line",
-                          "ladder",
-                          "reference",
-                          "fair",
-                          "prob",
-                          "pick"
-                      ]
-                  ):
-                      market_keys.add(
-                          key
-                      )
-
-          print("")
-          print("=" * 80)
-          print("MARKET-RELATED PROJECTION KEYS")
-          print("=" * 80)
-
-          if market_keys:
-
-              for key in sorted(
-                  market_keys
-              ):
-                  print(key)
-
-          else:
-
-              print(
-                  "NONE FOUND AT PROJECTION LEVEL"
+              histogram = prop.get(
+                  "simulation_histogram",
+                  []
               )
 
-          # ========================================================
-          # FIND AUSTIN HOOPER
-          # ========================================================
+              if not histogram:
+                  skipped_no_histogram += 1
+                  continue
 
-          hooper = [
-              prop
-              for prop in projections
-              if "austin hooper"
-              in str(
-                  prop.get(
-                      "player",
-                      ""
+              total = histogram_total(histogram)
+
+              if total != EXPECTED_SIMS:
+                  raise RuntimeError(
+                      (
+                          "Invalid simulation count for "
+                          + str(prop.get("player"))
+                          + " "
+                          + str(prop.get("prop"))
+                          + ": "
+                          + str(total)
+                      )
                   )
-              ).lower()
+
+              market = get_market(prop)
+
+              if not market:
+                  skipped_no_market += 1
+                  continue
+
+              line = get_reference_line(prop)
+
+              if line is None:
+                  skipped_no_reference_line += 1
+                  continue
+
+              probs = probabilities_at_line(
+                  histogram,
+                  line
+              )
+
+              candidate = build_candidate(
+                  prop,
+                  line,
+                  probs
+              )
+
+              # Save analysis directly on projection.
+              prop["picks_analysis"] = {
+                  "version": "JPRO_PICKS_V1",
+
+                  "model_reference_line": line,
+
+                  "side":
+                      candidate["side"],
+
+                  "model_probability":
+                      candidate[
+                          "model_probability"
+                      ],
+
+                  "fair_odds":
+                      candidate["fair_odds"],
+
+                  "candidate_score":
+                      candidate[
+                          "candidate_score"
+                      ],
+
+                  "screening_status":
+                      candidate[
+                          "screening_status"
+                      ],
+
+                  "sportsbook_line": None,
+                  "sportsbook_odds": None,
+                  "model_edge": None,
+
+                  "qualified_pick": False,
+
+                  "status":
+                      "AWAITING_SPORTSBOOK_PRICE"
+              }
+
+              # Broad candidate gate.
+              # This is a watchlist, not a sportsbook pick.
+              if (
+                  candidate[
+                      "model_probability"
+                  ] >= 0.55
+              ):
+                  candidates.append(
+                      candidate
+                  )
+
+              processed += 1
+
+
+          # --------------------------------------------------------
+          # SORT
+          # --------------------------------------------------------
+
+          candidates.sort(
+              key=lambda item: (
+                  item["candidate_score"],
+                  item["model_probability"]
+              ),
+              reverse=True
+          )
+
+
+          # --------------------------------------------------------
+          # GROUPS
+          # --------------------------------------------------------
+
+          high_priority = [
+              item
+              for item in candidates
+              if item["screening_status"]
+              == "HIGH_PRIORITY"
           ]
 
-          print("")
-          print("=" * 80)
-          print("AUSTIN HOOPER RECORDS")
-          print("=" * 80)
+          review = [
+              item
+              for item in candidates
+              if item["screening_status"]
+              == "REVIEW"
+          ]
 
-          print(
-              "FOUND:",
-              len(hooper)
-          )
+          watch = [
+              item
+              for item in candidates
+              if item["screening_status"]
+              == "WATCH"
+          ]
 
-          for index, prop in enumerate(
-              hooper,
-              start=1
-          ):
 
-              print("")
-              print("-" * 80)
+          # --------------------------------------------------------
+          # SAVE ENGINE METADATA
+          # --------------------------------------------------------
 
-              print(
-                  "AUSTIN HOOPER RECORD",
-                  index
-              )
+          data["jpro_picks_engine"] = {
+              "version": "JPRO_PICKS_V1",
 
-              print("-" * 80)
+              "status":
+                  "READY_FOR_MARKET_INPUT",
 
-              print(
-                  "PLAYER:",
-                  prop.get(
-                      "player"
+              "method":
+                  "20K_SIM_ROLE_V2_MATCHUP_V1",
+
+              "reference_source":
+                  "market.model_reference_line",
+
+              "sportsbook_data_connected": False,
+
+              "qualified_picks_enabled": False,
+
+              "candidate_count":
+                  len(candidates),
+
+              "high_priority_count":
+                  len(high_priority),
+
+              "review_count":
+                  len(review),
+
+              "watch_count":
+                  len(watch),
+
+              "note":
+                  (
+                      "Screening candidates use JPro's "
+                      "internal model reference line. "
+                      "A real sportsbook line and price "
+                      "are required before model edge "
+                      "can be calculated."
                   )
-              )
-
-              print(
-                  "TEAM:",
-                  prop.get(
-                      "team"
-                  )
-              )
-
-              print(
-                  "OPPONENT:",
-                  prop.get(
-                      "opponent"
-                  )
-              )
-
-              print(
-                  "PROP:",
-                  prop.get(
-                      "prop"
-                  )
-              )
-
-              print(
-                  "PROJECTION:",
-                  prop.get(
-                      "projection"
-                  )
-              )
-
-              print(
-                  "MEDIAN:",
-                  prop.get(
-                      "median"
-                  )
-              )
-
-              print("")
-              print(
-                  "ALL TOP-LEVEL KEYS:"
-              )
-
-              print(
-                  sorted(
-                      prop.keys()
-                  )
-              )
-
-              print("")
-              print(
-                  "MARKET-RELATED VALUES:"
-              )
-
-              found_market_value = False
-
-              for key, value in prop.items():
-
-                  key_lower = str(
-                      key
-                  ).lower()
-
-                  if any(
-                      word in key_lower
-                      for word in [
-                          "market",
-                          "line",
-                          "ladder",
-                          "reference",
-                          "fair",
-                          "prob",
-                          "pick"
-                      ]
-                  ):
-
-                      found_market_value = True
-
-                      print("")
-                      print(
-                          "KEY:",
-                          key
-                      )
-
-                      pprint(
-                          value,
-                          width=120,
-                          sort_dicts=False
-                      )
-
-              if not found_market_value:
-
-                  print(
-                      "NO MARKET-RELATED VALUES "
-                      "FOUND ON THIS RECORD"
-                  )
-
-          # ========================================================
-          # SEARCH NESTED DICTIONARIES
-          # ========================================================
-
-          print("")
-          print("=" * 80)
-          print("NESTED DICTIONARY STRUCTURE")
-          print("=" * 80)
-
-          nested_keys = {}
-
-          for prop in projections[:100]:
-
-              for key, value in prop.items():
-
-                  if isinstance(
-                      value,
-                      dict
-                  ):
-
-                      if key not in nested_keys:
-
-                          nested_keys[key] = set()
-
-                      nested_keys[
-                          key
-                      ].update(
-                          value.keys()
-                      )
-
-          for key in sorted(
-              nested_keys.keys()
-          ):
-
-              print("")
-              print(
-                  "OBJECT:",
-                  key
-              )
-
-              print(
-                  "KEYS:",
-                  sorted(
-                      nested_keys[
-                          key
-                      ]
-                  )
-              )
-
-          # ========================================================
-          # TOP-LEVEL MARKET OBJECTS
-          # ========================================================
-
-          print("")
-          print("=" * 80)
-          print("TOP-LEVEL MARKET / PICK OBJECTS")
-          print("=" * 80)
-
-          found_top_level = False
-
-          for key, value in data.items():
-
-              key_lower = str(
-                  key
-              ).lower()
-
-              if any(
-                  word in key_lower
-                  for word in [
-                      "market",
-                      "pick",
-                      "line",
-                      "ladder"
-                  ]
-              ):
-
-                  found_top_level = True
-
-                  print("")
-                  print(
-                      "TOP LEVEL KEY:",
-                      key
-                  )
-
-                  if isinstance(
-                      value,
-                      list
-                  ):
-
-                      print(
-                          "TYPE: list"
-                      )
-
-                      print(
-                          "COUNT:",
-                          len(value)
-                      )
-
-                      if value:
-
-                          print(
-                              "FIRST ITEM:"
-                          )
-
-                          pprint(
-                              value[0],
-                              width=120,
-                              sort_dicts=False
-                          )
-
-                  elif isinstance(
-                      value,
-                      dict
-                  ):
-
-                      print(
-                          "TYPE: dict"
-                      )
-
-                      print(
-                          "KEYS:",
-                          sorted(
-                              value.keys()
-                          )
-                      )
-
-                      pprint(
-                          value,
-                          width=120,
-                          sort_dicts=False
-                      )
-
-                  else:
-
-                      print(
-                          "VALUE:",
-                          value
-                      )
-
-          if not found_top_level:
-
-              print(
-                  "NO TOP-LEVEL MARKET OBJECTS FOUND"
-              )
-
-          # ========================================================
-          # SEARCH RECURSIVELY FOR REFERENCE / ALT LINE KEYS
-          # ========================================================
-
-          print("")
-          print("=" * 80)
-          print("RECURSIVE MARKET KEY SEARCH")
-          print("=" * 80)
-
-          matches = []
-
-          def walk(
-              obj,
-              path="root"
-          ):
-
-              if isinstance(
-                  obj,
-                  dict
-              ):
-
-                  for key, value in obj.items():
-
-                      current_path = (
-                          path
-                          + "."
-                          + str(key)
-                      )
-
-                      key_lower = str(
-                          key
-                      ).lower()
-
-                      if any(
-                          word in key_lower
-                          for word in [
-                              "reference_line",
-                              "market_line",
-                              "alt_line",
-                              "ladder",
-                              "fair_over",
-                              "fair_under"
-                          ]
-                      ):
-
-                          matches.append(
-                              (
-                                  current_path,
-                                  value
-                              )
-                          )
-
-                      walk(
-                          value,
-                          current_path
-                      )
-
-              elif isinstance(
-                  obj,
-                  list
-              ):
-
-                  # Limit recursion through massive simulation arrays.
-                  for index, value in enumerate(
-                      obj[:50]
-                  ):
-
-                      walk(
-                          value,
-                          path
-                          + "["
-                          + str(index)
-                          + "]"
-                      )
-
-          # Search first 30 projections plus top-level metadata.
-          search_object = {
-              "top_level": {
-                  key: value
-                  for key, value in data.items()
-                  if key != "projections"
-              },
-              "projections":
-                  projections[:30]
           }
 
-          walk(
-              search_object
+          data[
+              "jpro_picks_candidates"
+          ] = candidates
+
+          data[
+              "jpro_high_priority_candidates"
+          ] = high_priority
+
+          data[
+              "jpro_review_candidates"
+          ] = review
+
+          data[
+              "jpro_watch_candidates"
+          ] = watch
+
+          # No real sportsbook picks yet.
+          data["jpro_picks"] = []
+
+          data["picks_engine_ready"] = True
+
+          data[
+              "picks_engine_version"
+          ] = "JPRO_PICKS_V1"
+
+
+          # --------------------------------------------------------
+          # WRITE JSON
+          # --------------------------------------------------------
+
+          with open(
+              PATH,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  data,
+                  f,
+                  separators=(",", ":")
+              )
+
+
+          # --------------------------------------------------------
+          # OUTPUT
+          # --------------------------------------------------------
+
+          print("")
+          print("=" * 72)
+          print("JPRO PICKS ENGINE V1 COMPLETE")
+          print("=" * 72)
+
+          print(
+              "Total projections:",
+              len(projections)
           )
 
           print(
-              "MATCHES FOUND:",
-              len(matches)
+              "Processed:",
+              processed
           )
 
-          for index, (
-              path,
-              value
-          ) in enumerate(
-              matches[:100],
+          print(
+              "Skipped - no histogram:",
+              skipped_no_histogram
+          )
+
+          print(
+              "Skipped - no market:",
+              skipped_no_market
+          )
+
+          print(
+              "Skipped - no model_reference_line:",
+              skipped_no_reference_line
+          )
+
+          print(
+              "Candidates:",
+              len(candidates)
+          )
+
+          print(
+              "High priority:",
+              len(high_priority)
+          )
+
+          print(
+              "Review:",
+              len(review)
+          )
+
+          print(
+              "Watch:",
+              len(watch)
+          )
+
+          print(
+              "Qualified sportsbook picks:",
+              0
+          )
+
+          print("")
+          print("=" * 72)
+          print("JPRO PICKS CANDIDATE PREVIEW")
+          print("=" * 72)
+
+          for i, item in enumerate(
+              candidates[:25],
               start=1
           ):
-
               print("")
               print(
-                  "MATCH",
-                  index
+                  f"#{i}",
+                  item.get("player"),
+                  "|",
+                  item.get("team"),
+                  "vs",
+                  item.get("opponent")
               )
 
               print(
-                  "PATH:",
-                  path
+                  "  PROP:",
+                  item.get("prop")
               )
 
               print(
-                  "VALUE:"
+                  "  SIDE:",
+                  item.get("side")
               )
 
-              pprint(
-                  value,
-                  width=120,
-                  sort_dicts=False
+              print(
+                  "  MODEL REFERENCE:",
+                  item.get(
+                      "model_reference_line"
+                  )
+              )
+
+              print(
+                  "  PROJECTION:",
+                  item.get("projection")
+              )
+
+              print(
+                  "  MODEL PROBABILITY:",
+                  str(
+                      item.get(
+                          "model_probability_pct"
+                      )
+                  )
+                  + "%"
+              )
+
+              print(
+                  "  FAIR ODDS:",
+                  item.get("fair_odds")
+              )
+
+              print(
+                  "  ROLE:",
+                  item.get("role_label"),
+                  item.get("role_score")
+              )
+
+              print(
+                  "  MATCHUP:",
+                  item.get("matchup_label"),
+                  item.get("matchup_score")
+              )
+
+              print(
+                  "  CANDIDATE SCORE:",
+                  item.get(
+                      "candidate_score"
+                  )
+              )
+
+              print(
+                  "  SCREEN:",
+                  item.get(
+                      "screening_status"
+                  )
+              )
+
+              print(
+                  "  STATUS:",
+                  item.get("status")
               )
 
           print("")
-          print("=" * 80)
-          print("DIAGNOSTIC COMPLETE - NO FILES MODIFIED")
-          print("=" * 80)
+          print("Saved:", PATH)
 
           PY
+
+      # ============================================================
+      # VERIFY PICKS ENGINE
+      # ============================================================
+
+      - name: Verify JPro Picks Engine V1
+        run: |
+          python <<'PY'
+          import json
+
+          PATH = "data/jpro-current-projections.json"
+          EXPECTED_SIMS = 20000
+
+          print("=" * 72)
+          print("VERIFY JPRO PICKS ENGINE V1")
+          print("=" * 72)
+
+          with open(
+              PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          if (
+              data.get("picks_engine_version")
+              != "JPRO_PICKS_V1"
+          ):
+              raise RuntimeError(
+                  "Wrong Picks Engine version."
+              )
+
+          engine = data.get(
+              "jpro_picks_engine",
+              {}
+          )
+
+          if (
+              engine.get("status")
+              != "READY_FOR_MARKET_INPUT"
+          ):
+              raise RuntimeError(
+                  "Wrong Picks Engine status."
+              )
+
+          if (
+              engine.get("reference_source")
+              != "market.model_reference_line"
+          ):
+              raise RuntimeError(
+                  "Wrong reference source."
+              )
+
+          projections = data.get(
+              "projections",
+              []
+          )
+
+          candidates = data.get(
+              "jpro_picks_candidates",
+              []
+          )
+
+          if not projections:
+              raise RuntimeError(
+                  "No projections."
+              )
+
+          if not candidates:
+              raise RuntimeError(
+                  "No Picks candidates generated."
+              )
+
+          # Verify real sportsbook information
+          # has NOT been fabricated.
+          for item in candidates:
+
+              if (
+                  item.get(
+                      "model_reference_line"
+                  )
+                  is None
+              ):
+                  raise RuntimeError(
+                      "Candidate missing reference line."
+                  )
+
+              probability = float(
+                  item.get(
+                      "model_probability",
+                      -1
+                  )
+              )
+
+              if not (
+                  0 <= probability <= 1
+              ):
+                  raise RuntimeError(
+                      "Invalid model probability."
+                  )
+
+              score = float(
+                  item.get(
+                      "candidate_score",
+                      -1
+                  )
+              )
+
+              if not (
+                  0 <= score <= 100
+              ):
+                  raise RuntimeError(
+                      "Invalid candidate score."
+                  )
+
+              if (
+                  item.get("sportsbook")
+                  is not None
+              ):
+                  raise RuntimeError(
+                      "Fabricated sportsbook."
+                  )
+
+              if (
+                  item.get("sportsbook_line")
+                  is not None
+              ):
+                  raise RuntimeError(
+                      "Fabricated sportsbook line."
+                  )
+
+              if (
+                  item.get("sportsbook_odds")
+                  is not None
+              ):
+                  raise RuntimeError(
+                      "Fabricated sportsbook odds."
+                  )
+
+              if (
+                  item.get("model_edge")
+                  is not None
+              ):
+                  raise RuntimeError(
+                      "Edge exists without real price."
+                  )
+
+              if item.get(
+                  "qualified_pick"
+              ):
+                  raise RuntimeError(
+                      "Unpriced candidate marked qualified."
+                  )
+
+          # Verify 20K distributions remain.
+          verified_20k = 0
+
+          for prop in projections:
+              histogram = prop.get(
+                  "simulation_histogram",
+                  []
+              )
+
+              if not histogram:
+                  continue
+
+              total = sum(
+                  int(row[1])
+                  for row in histogram
+              )
+
+              if total == EXPECTED_SIMS:
+                  verified_20k += 1
+
+          if verified_20k == 0:
+              raise RuntimeError(
+                  "20K distributions missing."
+              )
+
+          # Verify Role V2 remains.
+          role_v2 = 0
+
+          for prop in projections:
+              role = prop.get("role", {})
+
+              if (
+                  isinstance(role, dict)
+                  and role.get("role_method")
+                  == "OPPORTUNITY_BLEND_V2"
+              ):
+                  role_v2 += 1
+
+          if role_v2 == 0:
+              raise RuntimeError(
+                  "Role V2 missing."
+              )
+
+          # Verify matchup intelligence remains.
+          matchups = 0
+
+          for prop in projections:
+              matchup = prop.get(
+                  "matchup",
+                  {}
+              )
+
+              if (
+                  isinstance(matchup, dict)
+                  and matchup
+              ):
+                  matchups += 1
+
+          if matchups == 0:
+              raise RuntimeError(
+                  "Matchup Intelligence missing."
+              )
+
+          # Verify Market Engine reference lines.
+          market_lines = 0
+
+          for prop in projections:
+              market = prop.get(
+                  "market",
+                  {}
+              )
+
+              if (
+                  isinstance(market, dict)
+                  and market.get(
+                      "model_reference_line"
+                  )
+                  is not None
+              ):
+                  market_lines += 1
+
+          if market_lines == 0:
+              raise RuntimeError(
+                  "Market reference lines missing."
+              )
+
+          # No actual sportsbook picks yet.
+          actual_picks = data.get(
+              "jpro_picks",
+              []
+          )
+
+          if actual_picks:
+              raise RuntimeError(
+                  "Actual picks should be empty "
+                  "until real market input exists."
+              )
+
+          high_priority = data.get(
+              "jpro_high_priority_candidates",
+              []
+          )
+
+          review = data.get(
+              "jpro_review_candidates",
+              []
+          )
+
+          watch = data.get(
+              "jpro_watch_candidates",
+              []
+          )
+
+          if (
+              len(high_priority)
+              + len(review)
+              + len(watch)
+              != len(candidates)
+          ):
+              raise RuntimeError(
+                  "Screening counts do not match."
+              )
+
+          print(
+              "Projections:",
+              len(projections)
+          )
+
+          print(
+              "20K distributions:",
+              verified_20k
+          )
+
+          print(
+              "Role V2 records:",
+              role_v2
+          )
+
+          print(
+              "Matchup records:",
+              matchups
+          )
+
+          print(
+              "Market reference lines:",
+              market_lines
+          )
+
+          print(
+              "Candidates:",
+              len(candidates)
+          )
+
+          print(
+              "High priority:",
+              len(high_priority)
+          )
+
+          print(
+              "Review:",
+              len(review)
+          )
+
+          print(
+              "Watch:",
+              len(watch)
+          )
+
+          print(
+              "Qualified sportsbook picks:",
+              len(actual_picks)
+          )
+
+          print("")
+          print("=" * 72)
+          print("TOP CANDIDATE PREVIEW")
+          print("=" * 72)
+
+          for i, item in enumerate(
+              candidates[:15],
+              start=1
+          ):
+              print("")
+              print(
+                  f"#{i}",
+                  item.get("player"),
+                  "|",
+                  item.get("team"),
+                  "vs",
+                  item.get("opponent")
+              )
+
+              print(
+                  "  PROP:",
+                  item.get("prop")
+              )
+
+              print(
+                  "  SIDE:",
+                  item.get("side")
+              )
+
+              print(
+                  "  REFERENCE:",
+                  item.get(
+                      "model_reference_line"
+                  )
+              )
+
+              print(
+                  "  PROJECTION:",
+                  item.get("projection")
+              )
+
+              print(
+                  "  MODEL PROBABILITY:",
+                  str(
+                      item.get(
+                          "model_probability_pct"
+                      )
+                  )
+                  + "%"
+              )
+
+              print(
+                  "  FAIR ODDS:",
+                  item.get("fair_odds")
+              )
+
+              print(
+                  "  ROLE:",
+                  item.get("role_label"),
+                  item.get("role_score")
+              )
+
+              print(
+                  "  MATCHUP:",
+                  item.get("matchup_label"),
+                  item.get("matchup_score")
+              )
+
+              print(
+                  "  SCORE:",
+                  item.get(
+                      "candidate_score"
+                  )
+              )
+
+              print(
+                  "  SCREEN:",
+                  item.get(
+                      "screening_status"
+                  )
+              )
+
+          print("")
+          print("=" * 72)
+          print("JPRO PICKS ENGINE V1 VERIFIED")
+          print("=" * 72)
+
+          PY
+
+      # ============================================================
+      # SAVE
+      # ============================================================
+
+      - name: Save JPro Picks Engine V1
+        run: |
+          git config user.name "JPro Cloud Engine"
+          git config user.email "actions@github.com"
+
+          git add data/jpro-current-projections.json
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add JPro Picks Engine V1"
+            git push
+          fi
