@@ -1,4 +1,4 @@
-name: JPro Availability Engine V1.2
+name: JPro Availability Engine V1.3
 
 on:
   workflow_dispatch:
@@ -19,16 +19,17 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install Availability Engine V1.2
+      - name: Install Availability Engine V1.3
         run: |
           python -m pip install --upgrade pip
           pip install nflreadpy polars pyarrow
 
-      - name: Audit Weekly Roster Statuses V1.2
+      - name: Build Current Player Universe V1.3
         run: |
           python <<'PY'
           import json
           import os
+          import re
           from collections import Counter, defaultdict
 
           import nflreadpy as nfl
@@ -36,14 +37,27 @@ jobs:
 
 
           SEASON = 2026
-          OUTPUT = "data/jpro-roster-status-audit.json"
+
+          OUTPUT = "data/jpro-current-player-universe.json"
+          PROJECTION_PATH = "data/jpro-current-projections.json"
 
           SKILL_POSITIONS = {"QB", "RB", "WR", "TE"}
 
+          # Roster classifications learned from V1.2.
+          #
+          # ACT = current active roster
+          # RES / INA = still tied to current team, but unavailable pool
+          # DEV = developmental/practice-squad context
+          # RET / CUT / EXE = not part of current usable team pool
+          ACTIVE_CODES = {"ACT"}
+          UNAVAILABLE_CODES = {"RES", "INA"}
+          DEVELOPMENT_CODES = {"DEV"}
+          EXCLUDED_CODES = {"RET", "CUT", "EXE"}
+
 
           print("=" * 78)
-          print("JPRO AVAILABILITY ENGINE V1.2")
-          print("WEEKLY ROSTER STATUS AUDIT")
+          print("JPRO AVAILABILITY ENGINE V1.3")
+          print("CURRENT PLAYER UNIVERSE")
           print("=" * 78)
 
 
@@ -53,14 +67,14 @@ jobs:
               return pl.DataFrame(data)
 
 
-          def text(value):
+          def txt(value):
               if value is None:
                   return ""
               return str(value).strip()
 
 
           def upper(value):
-              return text(value).upper()
+              return txt(value).upper()
 
 
           def safe_int(value, default=0):
@@ -77,25 +91,69 @@ jobs:
               return None
 
 
+          def normalize_name(value):
+              value = txt(value).lower()
+
+              value = (
+                  value
+                  .replace("’", "'")
+                  .replace("`", "'")
+                  .replace(".", "")
+                  .replace("'", "")
+                  .replace("-", " ")
+              )
+
+              value = re.sub(
+                  r"\b(jr|sr|ii|iii|iv|v)\b",
+                  "",
+                  value
+              )
+
+              value = re.sub(
+                  r"[^a-z0-9 ]+",
+                  " ",
+                  value
+              )
+
+              value = re.sub(
+                  r"\s+",
+                  " ",
+                  value
+              ).strip()
+
+              return value
+
+
+          def classify_status(status):
+              status = upper(status)
+
+              if status in ACTIVE_CODES:
+                  return "ACTIVE_ROSTER"
+
+              if status in UNAVAILABLE_CODES:
+                  return "ROSTER_UNAVAILABLE"
+
+              if status in DEVELOPMENT_CODES:
+                  return "DEVELOPMENT"
+
+              if status in EXCLUDED_CODES:
+                  return "EXCLUDED"
+
+              return "UNKNOWN"
+
+
+          # ==========================================================
+          # LOAD WEEKLY ROSTERS
+          # ==========================================================
+
           print("")
           print("Loading 2026 weekly rosters...")
 
-          weekly = to_pl(
+          roster = to_pl(
               nfl.load_rosters_weekly([SEASON])
           )
 
-          print(
-              "Rows:",
-              weekly.height
-          )
-
-          print(
-              "Columns:",
-              len(weekly.columns)
-          )
-
-
-          columns = set(weekly.columns)
+          columns = set(roster.columns)
 
           season_col = first_col(
               columns,
@@ -163,12 +221,12 @@ jobs:
 
           if missing:
               raise RuntimeError(
-                  "Missing required fields: "
+                  "Missing required roster fields: "
                   + ", ".join(missing)
               )
 
 
-          rows = weekly.to_dicts()
+          rows = roster.to_dicts()
 
 
           season_rows = [
@@ -182,20 +240,16 @@ jobs:
 
           weeks = sorted(
               {
-                  safe_int(
-                      row.get(week_col)
-                  )
+                  safe_int(row.get(week_col))
                   for row in season_rows
-                  if safe_int(
-                      row.get(week_col)
-                  ) > 0
+                  if safe_int(row.get(week_col)) > 0
               }
           )
 
 
           if not weeks:
               raise RuntimeError(
-                  "No valid 2026 roster weeks found."
+                  "No 2026 weekly roster snapshots found."
               )
 
 
@@ -212,48 +266,33 @@ jobs:
 
 
           print("")
-          print("=" * 78)
-          print("LATEST SNAPSHOT")
-          print("=" * 78)
-
-          print(
-              "Season:",
-              SEASON
-          )
-
-          print(
-              "Week:",
-              latest_week
-          )
-
-          print(
-              "Snapshot rows:",
-              len(snapshot)
-          )
+          print("Latest roster week:", latest_week)
+          print("Snapshot rows:", len(snapshot))
 
 
           # ==========================================================
-          # STATUS COUNTS
+          # BUILD CURRENT PLAYER UNIVERSE
           # ==========================================================
 
-          status_counts = Counter()
+          players = []
 
-          skill_status_counts = Counter()
+          seen_ids = set()
 
-          status_team_counts = defaultdict(Counter)
-
-          status_examples = defaultdict(list)
+          classification_counts = Counter()
+          skill_classification_counts = Counter()
+          team_active_counts = Counter()
+          team_active_skill_counts = Counter()
 
 
           for row in snapshot:
 
-              status = upper(
-                  row.get(status_col)
+              player_id = txt(
+                  row.get(id_col)
               )
 
-              if not status:
-                  status = "<BLANK>"
-
+              player_name = txt(
+                  row.get(name_col)
+              )
 
               team = upper(
                   row.get(team_col)
@@ -263,298 +302,735 @@ jobs:
                   row.get(position_col)
               )
 
-              player = text(
-                  row.get(name_col)
+              roster_status = upper(
+                  row.get(status_col)
+              )
+
+              classification = classify_status(
+                  roster_status
               )
 
 
-              status_counts[status] += 1
+              # GSIS ID is preferred. Name fallback is retained
+              # only for audit/matching.
+              unique_key = (
+                  player_id
+                  if player_id
+                  else
+                  f"{normalize_name(player_name)}::{team}"
+              )
 
 
-              if position in SKILL_POSITIONS:
-                  skill_status_counts[
-                      status
+              if unique_key in seen_ids:
+                  continue
+
+
+              seen_ids.add(unique_key)
+
+
+              is_skill = (
+                  position in SKILL_POSITIONS
+              )
+
+              betting_pool_eligible = (
+                  classification == "ACTIVE_ROSTER"
+                  and is_skill
+              )
+
+
+              player = {
+                  "player_id":
+                      player_id,
+
+                  "player":
+                      player_name,
+
+                  "normalized_name":
+                      normalize_name(player_name),
+
+                  "team":
+                      team,
+
+                  "position":
+                      position,
+
+                  "roster_status":
+                      roster_status,
+
+                  "classification":
+                      classification,
+
+                  "is_skill_player":
+                      is_skill,
+
+                  "betting_pool_eligible":
+                      betting_pool_eligible
+              }
+
+
+              players.append(player)
+
+
+              classification_counts[
+                  classification
+              ] += 1
+
+
+              if is_skill:
+                  skill_classification_counts[
+                      classification
                   ] += 1
 
 
-              if team:
-                  status_team_counts[
-                      status
-                  ][team] += 1
+              if classification == "ACTIVE_ROSTER":
+                  team_active_counts[
+                      team
+                  ] += 1
 
+
+                  if is_skill:
+                      team_active_skill_counts[
+                          team
+                      ] += 1
+
+
+          # ==========================================================
+          # INDEX CURRENT PLAYERS
+          # ==========================================================
+
+          by_id = {}
+
+          by_name_team = {}
+
+          by_name = defaultdict(list)
+
+
+          for player in players:
+
+              pid = player["player_id"]
+
+              if pid:
+                  by_id[pid] = player
+
+
+              name_key = player[
+                  "normalized_name"
+              ]
+
+              team = player["team"]
+
+
+              if name_key:
+                  by_name_team[
+                      (name_key, team)
+                  ] = player
+
+                  by_name[
+                      name_key
+                  ].append(player)
+
+
+          # ==========================================================
+          # LOAD JPRO CURRENT PROJECTIONS
+          # ==========================================================
+
+          if not os.path.exists(
+              PROJECTION_PATH
+          ):
+              raise RuntimeError(
+                  f"Missing {PROJECTION_PATH}"
+              )
+
+
+          with open(
+              PROJECTION_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              projection_data = json.load(f)
+
+
+          if isinstance(
+              projection_data,
+              list
+          ):
+              projections = projection_data
+
+          elif isinstance(
+              projection_data,
+              dict
+          ):
+              projections = projection_data.get(
+                  "projections",
+                  []
+              )
+
+          else:
+              projections = []
+
+
+          if not projections:
+              raise RuntimeError(
+                  "No projections found in current projection JSON."
+              )
+
+
+          print("")
+          print("Current projections loaded:", len(projections))
+
+
+          # ==========================================================
+          # MATCH MODEL PLAYERS TO CURRENT ROSTER
+          # ==========================================================
+
+          audit = []
+
+          match_counts = Counter()
+
+          stale_examples = []
+
+          team_mismatch_examples = []
+
+          unavailable_examples = []
+
+          development_examples = []
+
+
+          for projection in projections:
+
+              projection_id = txt(
+                  projection.get("player_id")
+              )
+
+              projection_name = txt(
+                  projection.get("player")
+                  or projection.get("player_name")
+              )
+
+              projection_team = upper(
+                  projection.get("team")
+              )
+
+              projection_position = upper(
+                  projection.get("position")
+              )
+
+              normalized = normalize_name(
+                  projection_name
+              )
+
+
+              matched = None
+              match_method = None
+
+
+              # ----------------------------------------------
+              # 1. Exact player ID
+              # ----------------------------------------------
 
               if (
-                  len(
-                      status_examples[status]
-                  )
-                  < 12
+                  projection_id
+                  and projection_id in by_id
               ):
-                  status_examples[
-                      status
-                  ].append(
-                      {
-                          "player":
-                              player,
-
-                          "team":
-                              team,
-
-                          "position":
-                              position
-                      }
-                  )
-
-
-          # ==========================================================
-          # PRINT STATUS AUDIT
-          # ==========================================================
-
-          print("")
-          print("=" * 78)
-          print("WEEK 3 STATUS COUNTS")
-          print("=" * 78)
-
-
-          for status, count in (
-              status_counts.most_common()
-          ):
-
-              print(
-                  f"{status}: {count}"
-              )
-
-
-          print("")
-          print("=" * 78)
-          print("WEEK 3 SKILL-PLAYER STATUS COUNTS")
-          print("=" * 78)
-
-
-          for status, count in (
-              skill_status_counts.most_common()
-          ):
-
-              print(
-                  f"{status}: {count}"
-              )
-
-
-          print("")
-          print("=" * 78)
-          print("STATUS EXAMPLES")
-          print("=" * 78)
-
-
-          for status, count in (
-              status_counts.most_common()
-          ):
-
-              print("")
-              print(
-                  f"STATUS: {status}"
-              )
-
-              print(
-                  f"TOTAL: {count}"
-              )
-
-              print(
-                  "SKILL PLAYERS:",
-                  skill_status_counts.get(
-                      status,
-                      0
-                  )
-              )
-
-              print("EXAMPLES:")
-
-
-              for example in (
-                  status_examples[
-                      status
+                  matched = by_id[
+                      projection_id
                   ]
-              ):
 
-                  print(
-                      "   ",
-                      example["team"],
-                      "|",
-                      example["player"],
-                      "|",
-                      example["position"]
+                  match_method = "PLAYER_ID"
+
+
+              # ----------------------------------------------
+              # 2. Exact normalized name + team
+              # ----------------------------------------------
+
+              if matched is None:
+
+                  key = (
+                      normalized,
+                      projection_team
                   )
 
+                  if key in by_name_team:
+                      matched = by_name_team[
+                          key
+                      ]
 
-          # ==========================================================
-          # TEAM-BY-STATUS COUNTS
-          # ==========================================================
-
-          teams = sorted(
-              {
-                  upper(
-                      row.get(team_col)
-                  )
-                  for row in snapshot
-                  if upper(
-                      row.get(team_col)
-                  )
-              }
-          )
+                      match_method = "NAME_TEAM"
 
 
-          print("")
-          print("=" * 78)
-          print("TEAM / STATUS COUNTS")
-          print("=" * 78)
+              # ----------------------------------------------
+              # 3. Unique normalized name
+              #
+              # This catches a stale team assignment while
+              # avoiding ambiguous same-name matches.
+              # ----------------------------------------------
 
+              if matched is None:
 
-          for team in teams:
-
-              team_statuses = Counter()
-
-
-              for row in snapshot:
-
-                  if upper(
-                      row.get(team_col)
-                  ) != team:
-                      continue
-
-
-                  status = upper(
-                      row.get(status_col)
+                  candidates = by_name.get(
+                      normalized,
+                      []
                   )
 
-                  if not status:
-                      status = "<BLANK>"
+                  if len(candidates) == 1:
+                      matched = candidates[0]
+
+                      match_method = "UNIQUE_NAME"
 
 
-                  team_statuses[
-                      status
+              # ----------------------------------------------
+              # CLASSIFY PROJECTION
+              # ----------------------------------------------
+
+              if matched is None:
+
+                  model_status = (
+                      "NOT_CURRENT_ROSTER"
+                  )
+
+                  current_team = None
+                  roster_status = None
+                  roster_classification = None
+                  betting_pool_eligible = False
+
+                  match_counts[
+                      model_status
                   ] += 1
 
 
-              print("")
-              print(
-                  team,
-                  dict(
-                      team_statuses
+                  if len(stale_examples) < 30:
+
+                      stale_examples.append(
+                          {
+                              "player":
+                                  projection_name,
+
+                              "projection_team":
+                                  projection_team,
+
+                              "position":
+                                  projection_position,
+
+                              "prop":
+                                  projection.get(
+                                      "prop"
+                                  )
+                          }
+                      )
+
+
+              else:
+
+                  current_team = matched[
+                      "team"
+                  ]
+
+                  roster_status = matched[
+                      "roster_status"
+                  ]
+
+                  roster_classification = matched[
+                      "classification"
+                  ]
+
+                  betting_pool_eligible = matched[
+                      "betting_pool_eligible"
+                  ]
+
+
+                  if (
+                      projection_team
+                      and current_team
+                      and projection_team
+                      != current_team
+                  ):
+
+                      model_status = (
+                          "CURRENT_PLAYER_TEAM_MISMATCH"
+                      )
+
+                      betting_pool_eligible = False
+
+
+                      if (
+                          len(
+                              team_mismatch_examples
+                          ) < 30
+                      ):
+                          team_mismatch_examples.append(
+                              {
+                                  "player":
+                                      projection_name,
+
+                                  "projection_team":
+                                      projection_team,
+
+                                  "current_team":
+                                      current_team,
+
+                                  "position":
+                                      projection_position,
+
+                                  "roster_status":
+                                      roster_status
+                              }
+                          )
+
+
+                  elif (
+                      roster_classification
+                      == "ACTIVE_ROSTER"
+                  ):
+
+                      model_status = (
+                          "CURRENT_ACTIVE_ROSTER"
+                      )
+
+
+                  elif (
+                      roster_classification
+                      == "ROSTER_UNAVAILABLE"
+                  ):
+
+                      model_status = (
+                          "CURRENT_ROSTER_UNAVAILABLE"
+                      )
+
+                      betting_pool_eligible = False
+
+
+                      if (
+                          len(
+                              unavailable_examples
+                          ) < 30
+                      ):
+                          unavailable_examples.append(
+                              {
+                                  "player":
+                                      projection_name,
+
+                                  "team":
+                                      current_team,
+
+                                  "position":
+                                      projection_position,
+
+                                  "roster_status":
+                                      roster_status
+                              }
+                          )
+
+
+                  elif (
+                      roster_classification
+                      == "DEVELOPMENT"
+                  ):
+
+                      model_status = (
+                          "DEVELOPMENT_PLAYER"
+                      )
+
+                      betting_pool_eligible = False
+
+
+                      if (
+                          len(
+                              development_examples
+                          ) < 30
+                      ):
+                          development_examples.append(
+                              {
+                                  "player":
+                                      projection_name,
+
+                                  "team":
+                                      current_team,
+
+                                  "position":
+                                      projection_position,
+
+                                  "roster_status":
+                                      roster_status
+                              }
+                          )
+
+
+                  else:
+
+                      model_status = (
+                          "CURRENT_ROSTER_EXCLUDED"
+                      )
+
+                      betting_pool_eligible = False
+
+
+                  match_counts[
+                      model_status
+                  ] += 1
+
+
+              audit.append(
+                  {
+                      "player_id":
+                          projection_id,
+
+                      "player":
+                          projection_name,
+
+                      "projection_team":
+                          projection_team,
+
+                      "current_team":
+                          current_team,
+
+                      "position":
+                          projection_position,
+
+                      "prop":
+                          projection.get(
+                              "prop"
+                          ),
+
+                      "match_method":
+                          match_method,
+
+                      "roster_status":
+                          roster_status,
+
+                      "roster_classification":
+                          roster_classification,
+
+                      "model_status":
+                          model_status,
+
+                      "betting_pool_eligible":
+                          betting_pool_eligible
+                  }
+              )
+
+
+          # ==========================================================
+          # PLAYER-LEVEL AUDIT
+          #
+          # Projections contain multiple props per player.
+          # We also want unique-player counts.
+          # ==========================================================
+
+          unique_model_players = {}
+
+          for row in audit:
+
+              key = (
+                  row["player_id"]
+                  or
+                  (
+                      normalize_name(
+                          row["player"]
+                      )
+                      + "::"
+                      + row["projection_team"]
                   )
               )
 
+              if key not in unique_model_players:
+                  unique_model_players[
+                      key
+                  ] = row
+
+
+          unique_status_counts = Counter(
+              row["model_status"]
+              for row in unique_model_players.values()
+          )
+
 
           # ==========================================================
-          # ACTIVE-CANDIDATE DIAGNOSTIC
-          #
-          # IMPORTANT:
-          # We are NOT approving these yet.
-          # This only shows what ACT looks like.
+          # PRINT CURRENT UNIVERSE
           # ==========================================================
 
-          act_rows = [
-              row
-              for row in snapshot
-              if upper(
-                  row.get(status_col)
-              ) == "ACT"
-          ]
+          print("")
+          print("=" * 78)
+          print("CURRENT 2026 PLAYER UNIVERSE")
+          print("=" * 78)
 
+          print(
+              "Universe players:",
+              len(players)
+          )
 
-          act_ids = {
-              text(
-                  row.get(id_col)
-              )
-              for row in act_rows
-              if text(
-                  row.get(id_col)
-              )
-          }
+          print(
+              "Active roster players:",
+              classification_counts[
+                  "ACTIVE_ROSTER"
+              ]
+          )
 
+          print(
+              "Active skill players:",
+              skill_classification_counts[
+                  "ACTIVE_ROSTER"
+              ]
+          )
 
-          act_skill = [
-              row
-              for row in act_rows
-              if upper(
-                  row.get(position_col)
-              )
-              in SKILL_POSITIONS
-          ]
+          print(
+              "Roster unavailable:",
+              classification_counts[
+                  "ROSTER_UNAVAILABLE"
+              ]
+          )
 
+          print(
+              "Development:",
+              classification_counts[
+                  "DEVELOPMENT"
+              ]
+          )
 
-          act_teams = {
-              upper(
-                  row.get(team_col)
-              )
-              for row in act_rows
-              if upper(
-                  row.get(team_col)
-              )
-          }
-
-
-          act_team_counts = Counter(
-              upper(
-                  row.get(team_col)
-              )
-              for row in act_rows
-              if upper(
-                  row.get(team_col)
-              )
+          print(
+              "Excluded:",
+              classification_counts[
+                  "EXCLUDED"
+              ]
           )
 
 
           print("")
           print("=" * 78)
-          print("ACT STATUS DIAGNOSTIC")
+          print("ACTIVE ROSTER BY TEAM")
           print("=" * 78)
-
-          print(
-              "ACT rows:",
-              len(act_rows)
-          )
-
-          print(
-              "Unique ACT players:",
-              len(act_ids)
-          )
-
-          print(
-              "ACT skill players:",
-              len(act_skill)
-          )
-
-          print(
-              "Teams represented by ACT:",
-              len(act_teams)
-          )
-
-
-          print("")
-          print("ACT PLAYERS PER TEAM")
 
 
           for team in sorted(
-              act_team_counts
+              team_active_counts
           ):
 
               print(
-                  team,
-                  act_team_counts[
-                      team
-                  ]
+                  f"{team}: "
+                  f"{team_active_counts[team]} total | "
+                  f"{team_active_skill_counts[team]} skill"
               )
 
 
           # ==========================================================
-          # SAVE AUDIT ONLY
+          # PRINT MODEL AUDIT
+          # ==========================================================
+
+          print("")
+          print("=" * 78)
+          print("JPRO PROJECTION ROSTER AUDIT")
+          print("=" * 78)
+
+          print(
+              "Projection rows:",
+              len(audit)
+          )
+
+          print(
+              "Unique projected players:",
+              len(unique_model_players)
+          )
+
+
+          print("")
+          print("PROP-ROW STATUS COUNTS")
+
+          for key, value in (
+              match_counts.most_common()
+          ):
+              print(
+                  f"{key}: {value}"
+              )
+
+
+          print("")
+          print("UNIQUE PLAYER STATUS COUNTS")
+
+          for key, value in (
+              unique_status_counts.most_common()
+          ):
+              print(
+                  f"{key}: {value}"
+              )
+
+
+          # ==========================================================
+          # PRINT PROBLEMS
+          # ==========================================================
+
+          print("")
+          print("=" * 78)
+          print("TEAM MISMATCH EXAMPLES")
+          print("=" * 78)
+
+
+          if team_mismatch_examples:
+
+              for row in team_mismatch_examples:
+
+                  print(
+                      f"{row['player']} | "
+                      f"MODEL {row['projection_team']} -> "
+                      f"CURRENT {row['current_team']} | "
+                      f"{row['position']} | "
+                      f"{row['roster_status']}"
+                  )
+
+          else:
+              print("None")
+
+
+          print("")
+          print("=" * 78)
+          print("NOT CURRENT ROSTER EXAMPLES")
+          print("=" * 78)
+
+
+          if stale_examples:
+
+              for row in stale_examples:
+
+                  print(
+                      f"{row['player']} | "
+                      f"{row['projection_team']} | "
+                      f"{row['position']} | "
+                      f"{row['prop']}"
+                  )
+
+          else:
+              print("None")
+
+
+          print("")
+          print("=" * 78)
+          print("CURRENT ROSTER UNAVAILABLE EXAMPLES")
+          print("=" * 78)
+
+
+          if unavailable_examples:
+
+              for row in unavailable_examples:
+
+                  print(
+                      f"{row['team']} | "
+                      f"{row['player']} | "
+                      f"{row['position']} | "
+                      f"{row['roster_status']}"
+                  )
+
+          else:
+              print("None")
+
+
+          # ==========================================================
+          # SAVE
           # ==========================================================
 
           output = {
               "engine":
-                  "JPRO_AVAILABILITY_V1_2_STATUS_AUDIT",
+                  "JPRO_CURRENT_PLAYER_UNIVERSE_V1_3",
 
               "status":
-                  "AUDIT_ONLY",
+                  "AUDIT_READY",
 
               "season":
                   SEASON,
@@ -562,50 +1038,110 @@ jobs:
               "snapshot_week":
                   latest_week,
 
-              "snapshot_rows":
-                  len(snapshot),
+              "classification_rules": {
+                  "active":
+                      sorted(ACTIVE_CODES),
 
-              "status_counts":
-                  dict(
-                      status_counts
-                  ),
+                  "roster_unavailable":
+                      sorted(
+                          UNAVAILABLE_CODES
+                      ),
 
-              "skill_status_counts":
-                  dict(
-                      skill_status_counts
-                  ),
+                  "development":
+                      sorted(
+                          DEVELOPMENT_CODES
+                      ),
 
-              "status_examples":
-                  dict(
-                      status_examples
-                  ),
-
-              "act_diagnostic": {
-                  "rows":
-                      len(act_rows),
-
-                  "unique_players":
-                      len(act_ids),
-
-                  "skill_players":
-                      len(act_skill),
-
-                  "teams":
-                      len(act_teams),
-
-                  "team_counts":
-                      dict(
-                          sorted(
-                              act_team_counts.items()
-                          )
+                  "excluded":
+                      sorted(
+                          EXCLUDED_CODES
                       )
               },
 
+              "counts": {
+                  "universe_players":
+                      len(players),
+
+                  "active_roster_players":
+                      classification_counts[
+                          "ACTIVE_ROSTER"
+                      ],
+
+                  "active_skill_players":
+                      skill_classification_counts[
+                          "ACTIVE_ROSTER"
+                      ],
+
+                  "roster_unavailable":
+                      classification_counts[
+                          "ROSTER_UNAVAILABLE"
+                      ],
+
+                  "development":
+                      classification_counts[
+                          "DEVELOPMENT"
+                      ],
+
+                  "excluded":
+                      classification_counts[
+                          "EXCLUDED"
+                      ],
+
+                  "projection_rows":
+                      len(audit),
+
+                  "unique_projected_players":
+                      len(
+                          unique_model_players
+                      )
+              },
+
+              "projection_status_counts":
+                  dict(match_counts),
+
+              "unique_player_status_counts":
+                  dict(
+                      unique_status_counts
+                  ),
+
+              "team_active_counts":
+                  dict(
+                      sorted(
+                          team_active_counts.items()
+                      )
+                  ),
+
+              "team_active_skill_counts":
+                  dict(
+                      sorted(
+                          team_active_skill_counts.items()
+                      )
+                  ),
+
+              "team_mismatch_examples":
+                  team_mismatch_examples,
+
+              "not_current_roster_examples":
+                  stale_examples,
+
+              "unavailable_examples":
+                  unavailable_examples,
+
+              "development_examples":
+                  development_examples,
+
+              "players":
+                  players,
+
+              "projection_audit":
+                  audit,
+
               "important_note":
                   (
-                      "V1.2 is an audit only. "
-                      "No roster status has yet been approved "
-                      "as the JPro betting pool."
+                      "V1.3 audits the live JPro projection "
+                      "universe against the latest nflverse "
+                      "weekly roster snapshot. It does not "
+                      "modify jpro-current-projections.json."
                   )
           }
 
@@ -631,7 +1167,7 @@ jobs:
 
           print("")
           print("=" * 78)
-          print("JPRO AVAILABILITY V1.2 STATUS AUDIT COMPLETE")
+          print("JPRO CURRENT PLAYER UNIVERSE V1.3 COMPLETE")
           print("=" * 78)
 
           print(
@@ -640,18 +1176,18 @@ jobs:
           )
 
           print(
-              "NO PROJECTIONS MODIFIED."
+              "LIVE PROJECTIONS NOT MODIFIED."
           )
 
           PY
 
-      - name: Verify Availability Status Audit V1.2
+      - name: Verify Current Player Universe V1.3
         run: |
           python <<'PY'
           import json
 
 
-          PATH = "data/jpro-roster-status-audit.json"
+          PATH = "data/jpro-current-player-universe.json"
 
 
           with open(
@@ -659,44 +1195,84 @@ jobs:
               "r",
               encoding="utf-8"
           ) as f:
-
               data = json.load(f)
 
 
           if (
               data.get("engine")
               !=
-              "JPRO_AVAILABILITY_V1_2_STATUS_AUDIT"
+              "JPRO_CURRENT_PLAYER_UNIVERSE_V1_3"
           ):
               raise RuntimeError(
-                  "Wrong V1.2 audit version."
+                  "Wrong V1.3 engine version."
               )
 
 
           if (
               data.get("status")
               !=
-              "AUDIT_ONLY"
+              "AUDIT_READY"
           ):
               raise RuntimeError(
-                  "V1.2 must remain audit-only."
+                  "V1.3 universe is not audit-ready."
               )
 
 
           counts = data.get(
-              "status_counts",
+              "counts",
               {}
           )
 
 
-          if not counts:
+          active = counts.get(
+              "active_roster_players",
+              0
+          )
+
+          active_skill = counts.get(
+              "active_skill_players",
+              0
+          )
+
+
+          if not (
+              1500 <= active <= 1800
+          ):
               raise RuntimeError(
-                  "No roster status counts found."
+                  f"Active roster count suspicious: {active}"
               )
 
 
+          if not (
+              400 <= active_skill <= 600
+          ):
+              raise RuntimeError(
+                  "Active skill-player count suspicious: "
+                  f"{active_skill}"
+              )
+
+
+          team_counts = data.get(
+              "team_active_counts",
+              {}
+          )
+
+
+          if len(team_counts) != 32:
+              raise RuntimeError(
+                  "Expected 32 NFL teams, found "
+                  f"{len(team_counts)}"
+              )
+
+
+          status_counts = data.get(
+              "unique_player_status_counts",
+              {}
+          )
+
+
           print("=" * 78)
-          print("VERIFY JPRO AVAILABILITY V1.2")
+          print("VERIFY CURRENT PLAYER UNIVERSE V1.3")
           print("=" * 78)
 
           print(
@@ -707,99 +1283,113 @@ jobs:
           )
 
           print(
-              "Snapshot rows:",
-              data.get(
-                  "snapshot_rows"
+              "Active roster players:",
+              active
+          )
+
+          print(
+              "Active skill players:",
+              active_skill
+          )
+
+          print(
+              "Teams:",
+              len(team_counts)
+          )
+
+          print(
+              "Unique projected players:",
+              counts.get(
+                  "unique_projected_players"
               )
           )
 
 
           print("")
-          print("STATUS COUNTS")
+          print("MODEL PLAYER STATUS")
+
 
           for status, count in (
-              counts.items()
+              status_counts.items()
           ):
               print(
-                  status,
-                  count
+                  f"{status}: {count}"
               )
 
 
           print("")
-          print("SKILL STATUS COUNTS")
+          print("TEAM MISMATCHES:")
 
-          for status, count in (
-              data.get(
-                  "skill_status_counts",
-                  {}
-              ).items()
-          ):
-              print(
-                  status,
-                  count
-              )
-
-
-          act = data.get(
-              "act_diagnostic",
-              {}
+          mismatches = data.get(
+              "team_mismatch_examples",
+              []
           )
+
+
+          if mismatches:
+
+              for row in mismatches[:20]:
+
+                  print(
+                      f"{row['player']} | "
+                      f"{row['projection_team']} -> "
+                      f"{row['current_team']}"
+                  )
+
+          else:
+              print("None")
 
 
           print("")
-          print("ACT DIAGNOSTIC")
+          print("NOT CURRENT ROSTER:")
 
-          print(
-              "ACT rows:",
-              act.get("rows")
+          stale = data.get(
+              "not_current_roster_examples",
+              []
           )
 
-          print(
-              "Unique ACT players:",
-              act.get(
-                  "unique_players"
-              )
-          )
 
-          print(
-              "ACT skill players:",
-              act.get(
-                  "skill_players"
-              )
-          )
+          if stale:
 
-          print(
-              "ACT teams:",
-              act.get(
-                  "teams"
-              )
-          )
+              for row in stale[:20]:
+
+                  print(
+                      f"{row['player']} | "
+                      f"{row['projection_team']} | "
+                      f"{row['position']}"
+                  )
+
+          else:
+              print("None")
 
 
           print("")
           print("=" * 78)
-          print("JPRO AVAILABILITY V1.2 VERIFIED")
+          print("JPRO CURRENT PLAYER UNIVERSE V1.3 VERIFIED")
           print("=" * 78)
 
           print(
-              "AUDIT ONLY — NO PROJECTIONS MODIFIED."
+              "AUDIT PASSED."
+          )
+
+          print(
+              "LIVE PROJECTIONS REMAIN UNCHANGED."
           )
 
           PY
 
-      - name: Save Availability Status Audit V1.2
+      - name: Save Current Player Universe V1.3
         run: |
           git config user.name "JPro Cloud Engine"
           git config user.email "actions@github.com"
 
-          git add data/jpro-roster-status-audit.json
+          git add data/jpro-current-player-universe.json
 
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
             git commit \
-              -m "Add JPro Availability V1.2 roster status audit"
+              -m "Add JPro current player universe V1.3"
 
             git push
           fi
