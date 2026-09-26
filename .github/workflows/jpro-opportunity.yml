@@ -25,22 +25,16 @@ jobs:
           pip install nflreadpy polars pyarrow
 
       # ============================================================
-      # JPRO OPPORTUNITY REDISTRIBUTION V1
+      # JPRO OPPORTUNITY REDISTRIBUTION V1.1
       #
-      # PURPOSE:
-      # Learn historical teammate-out opportunity changes.
+      # SCHEMA-SAFE AUDIT ENGINE
       #
-      # IMPORTANT:
-      # V1 IS AN AUDIT / LEARNING LAYER.
-      #
-      # It DOES NOT modify live projections.
-      # It DOES NOT fabricate injury statuses.
-      # It DOES NOT automatically mark anyone inactive.
-      #
-      # It creates:
-      #
-      # data/jpro-opportunity-redistribution.json
-      #
+      # - Pulls nflverse weekly player stats
+      # - Detects changing column names automatically
+      # - Normalizes team/player/position fields
+      # - Learns teammate participation splits
+      # - DOES NOT modify live JPro projections
+      # - DOES NOT mark missing players officially inactive
       # ============================================================
 
       - name: Build Opportunity Redistribution V1
@@ -55,13 +49,8 @@ jobs:
           import polars as pl
 
 
-          # ========================================================
-          # CONFIG
-          # ========================================================
-
           OUTPUT_PATH = (
-              "data/"
-              "jpro-opportunity-redistribution.json"
+              "data/jpro-opportunity-redistribution.json"
           )
 
           CURRENT_SEASON = 2026
@@ -74,35 +63,17 @@ jobs:
               2026
           ]
 
-          # Minimum historical participation before
-          # treating somebody as a meaningful teammate.
           MIN_TEAM_GAMES = 4
-
-          # Minimum average opportunity required for a player
-          # to become an "absence trigger".
           MIN_WR_TE_TARGETS = 4.0
           MIN_RB_OPPORTUNITIES = 8.0
           MIN_QB_ATTEMPTS = 15.0
-
-          # Minimum games with / without teammate before
-          # we display stronger historical evidence.
           MIN_SPLIT_GAMES = 2
 
 
           print("=" * 76)
-          print("JPRO OPPORTUNITY REDISTRIBUTION V1")
+          print("JPRO OPPORTUNITY REDISTRIBUTION V1.1")
           print("=" * 76)
 
-          print("")
-          print(
-              "Historical seasons:",
-              HISTORICAL_SEASONS
-          )
-
-
-          # ========================================================
-          # HELPERS
-          # ========================================================
 
           def num(value, default=0.0):
               try:
@@ -120,16 +91,6 @@ jobs:
                   return default
 
 
-          def safe_div(a, b):
-              a = num(a)
-              b = num(b)
-
-              if b == 0:
-                  return 0.0
-
-              return a / b
-
-
           def round2(value):
               return round(
                   num(value),
@@ -137,19 +98,20 @@ jobs:
               )
 
 
-          def round3(value):
-              return round(
-                  num(value),
-                  3
-              )
+          def first_existing(columns, choices):
+              for choice in choices:
+                  if choice in columns:
+                      return choice
+
+              return None
 
 
           # ========================================================
-          # LOAD NFLVERSE WEEKLY PLAYER DATA
+          # LOAD WEEKLY PLAYER STATS
           # ========================================================
 
           print("")
-          print("Loading nflverse player stats...")
+          print("Loading nflverse weekly player stats...")
 
           weekly = nfl.load_player_stats(
               HISTORICAL_SEASONS
@@ -160,19 +122,159 @@ jobs:
           else:
               df = pl.DataFrame(weekly)
 
-          print(
-              "Raw rows:",
-              df.height
-          )
+          print("Raw rows:", df.height)
+          print("Raw columns:", len(df.columns))
 
-          print(
-              "Raw columns:",
-              len(df.columns)
-          )
+          print("")
+          print("=" * 76)
+          print("NFLVERSE COLUMN AUDIT")
+          print("=" * 76)
+
+          for col in df.columns:
+              print(col)
 
 
           # ========================================================
-          # REQUIRED COLUMNS
+          # SCHEMA DETECTION
+          # ========================================================
+
+          columns = set(df.columns)
+
+          season_col = first_existing(
+              columns,
+              [
+                  "season",
+                  "season_year"
+              ]
+          )
+
+          week_col = first_existing(
+              columns,
+              [
+                  "week",
+                  "week_number"
+              ]
+          )
+
+          player_id_col = first_existing(
+              columns,
+              [
+                  "player_id",
+                  "gsis_id",
+                  "player_gsis_id"
+              ]
+          )
+
+          player_name_col = first_existing(
+              columns,
+              [
+                  "player_display_name",
+                  "player_name",
+                  "name",
+                  "full_name"
+              ]
+          )
+
+          position_col = first_existing(
+              columns,
+              [
+                  "position",
+                  "position_group"
+              ]
+          )
+
+          team_col = first_existing(
+              columns,
+              [
+                  "recent_team",
+                  "team",
+                  "team_abbr",
+                  "team_abbreviation",
+                  "club",
+                  "posteam"
+              ]
+          )
+
+
+          print("")
+          print("=" * 76)
+          print("DETECTED SCHEMA")
+          print("=" * 76)
+
+          print("Season column:", season_col)
+          print("Week column:", week_col)
+          print("Player ID column:", player_id_col)
+          print("Player name column:", player_name_col)
+          print("Position column:", position_col)
+          print("Team column:", team_col)
+
+
+          required_detected = {
+              "season": season_col,
+              "week": week_col,
+              "player_id": player_id_col,
+              "player_name": player_name_col,
+              "position": position_col,
+              "team": team_col
+          }
+
+          missing = [
+              key
+              for key, value
+              in required_detected.items()
+              if value is None
+          ]
+
+          if missing:
+              raise RuntimeError(
+                  "Unable to detect required schema fields: "
+                  + ", ".join(missing)
+              )
+
+
+          # ========================================================
+          # NORMALIZE CORE COLUMNS
+          # ========================================================
+
+          rename_map = {}
+
+          if season_col != "season":
+              rename_map[season_col] = "season"
+
+          if week_col != "week":
+              rename_map[week_col] = "week"
+
+          if player_id_col != "player_id":
+              rename_map[player_id_col] = "player_id"
+
+          if player_name_col != "player_display_name":
+              rename_map[
+                  player_name_col
+              ] = "player_display_name"
+
+          if position_col != "position":
+              rename_map[
+                  position_col
+              ] = "position"
+
+          if team_col != "recent_team":
+              rename_map[
+                  team_col
+              ] = "recent_team"
+
+
+          if rename_map:
+              print("")
+              print("Normalizing schema:")
+              print(rename_map)
+
+              df = df.rename(
+                  rename_map
+              )
+
+
+          # ========================================================
+          # FINAL CORE SCHEMA CHECK
           # ========================================================
 
           required = [
@@ -184,16 +286,16 @@ jobs:
               "recent_team"
           ]
 
-          missing = [
+          missing_after = [
               col
               for col in required
               if col not in df.columns
           ]
 
-          if missing:
+          if missing_after:
               raise RuntimeError(
-                  "Missing required columns: "
-                  + ", ".join(missing)
+                  "Schema normalization failed. Missing: "
+                  + ", ".join(missing_after)
               )
 
 
@@ -231,7 +333,7 @@ jobs:
 
 
           # ========================================================
-          # KEEP SKILL POSITIONS
+          # SKILL POSITIONS
           # ========================================================
 
           df = df.filter(
@@ -250,30 +352,25 @@ jobs:
 
 
           # ========================================================
-          # NORMALIZE NUMERIC COLUMNS
+          # NORMALIZE NUMERIC DATA
           # ========================================================
 
-          numeric_columns = [
-              "season",
-              "week"
-          ] + available_opportunity
+          numeric_columns = (
+              ["season", "week"]
+              + available_opportunity
+          )
 
           for col in numeric_columns:
-              if col in df.columns:
-                  df = df.with_columns(
-                      pl.col(col)
-                      .cast(
-                          pl.Float64,
-                          strict=False
-                      )
-                      .fill_null(0)
-                      .alias(col)
+              df = df.with_columns(
+                  pl.col(col)
+                  .cast(
+                      pl.Float64,
+                      strict=False
                   )
+                  .fill_null(0)
+                  .alias(col)
+              )
 
-
-          # ========================================================
-          # BUILD PYTHON ROWS
-          # ========================================================
 
           keep_columns = [
               "season",
@@ -288,6 +385,7 @@ jobs:
               keep_columns
           ).to_dicts()
 
+          print("")
           print(
               "Skill-position rows:",
               len(rows)
@@ -295,10 +393,11 @@ jobs:
 
 
           # ========================================================
-          # HELPER: PLAYER OPPORTUNITY
+          # OPPORTUNITY FUNCTION
           # ========================================================
 
           def opportunities(row):
+
               position = row.get(
                   "position",
                   ""
@@ -317,57 +416,59 @@ jobs:
               )
 
               if position == "QB":
-                  return attempts + carries
+                  return (
+                      attempts
+                      + carries
+                  )
 
               if position == "RB":
-                  return carries + targets
+                  return (
+                      carries
+                      + targets
+                  )
 
               if position in [
                   "WR",
                   "TE"
               ]:
-                  return targets + carries
+                  return (
+                      targets
+                      + carries
+                  )
 
               return 0.0
 
 
           # ========================================================
-          # CREATE GAME KEY
+          # GAME KEYS
           # ========================================================
 
           for row in rows:
+
+              season = int(
+                  num(
+                      row.get("season")
+                  )
+              )
+
+              week = int(
+                  num(
+                      row.get("week")
+                  )
+              )
+
+              team = str(
+                  row.get("recent_team")
+              )
+
               row["_game_key"] = (
-                  str(
-                      int(
-                          num(
-                              row.get("season")
-                          )
-                      )
-                  )
-                  + "-"
-                  + str(
-                      int(
-                          num(
-                              row.get("week")
-                          )
-                      )
-                  )
-                  + "-"
-                  + str(
-                      row.get(
-                          "recent_team"
-                      )
-                  )
+                  f"{season}-{week}-{team}"
               )
 
               row["_opportunities"] = (
                   opportunities(row)
               )
 
-
-          # ========================================================
-          # GROUP TEAM GAMES
-          # ========================================================
 
           team_games = defaultdict(list)
 
@@ -376,14 +477,9 @@ jobs:
                   row["_game_key"]
               ].append(row)
 
-          print(
-              "Team-game groups:",
-              len(team_games)
-          )
-
 
           # ========================================================
-          # PLAYER TEAM HISTORY
+          # PLAYER-TEAM HISTORY
           # ========================================================
 
           player_team_rows = defaultdict(
@@ -391,9 +487,14 @@ jobs:
           )
 
           for row in rows:
+
               key = (
-                  row.get("player_id"),
-                  row.get("recent_team")
+                  str(
+                      row.get("player_id")
+                  ),
+                  str(
+                      row.get("recent_team")
+                  )
               )
 
               player_team_rows[
@@ -402,7 +503,7 @@ jobs:
 
 
           # ========================================================
-          # BASE PLAYER PROFILES
+          # PLAYER PROFILES
           # ========================================================
 
           player_profiles = {}
@@ -410,6 +511,7 @@ jobs:
           for key, history in (
               player_team_rows.items()
           ):
+
               player_id, team = key
 
               if len(history) < MIN_TEAM_GAMES:
@@ -418,14 +520,20 @@ jobs:
               latest = sorted(
                   history,
                   key=lambda r: (
-                      num(r.get("season")),
-                      num(r.get("week"))
+                      num(
+                          r.get("season")
+                      ),
+                      num(
+                          r.get("week")
+                      )
                   )
               )[-1]
 
               position = latest.get(
                   "position"
               )
+
+              games = len(history)
 
               avg_attempts = (
                   sum(
@@ -434,7 +542,7 @@ jobs:
                       )
                       for r in history
                   )
-                  / len(history)
+                  / games
               )
 
               avg_carries = (
@@ -444,7 +552,7 @@ jobs:
                       )
                       for r in history
                   )
-                  / len(history)
+                  / games
               )
 
               avg_targets = (
@@ -454,7 +562,7 @@ jobs:
                       )
                       for r in history
                   )
-                  / len(history)
+                  / games
               )
 
               avg_opportunity = (
@@ -466,21 +574,23 @@ jobs:
                       )
                       for r in history
                   )
-                  / len(history)
+                  / games
               )
 
               meaningful = False
 
               if (
                   position == "QB"
-                  and avg_attempts
+                  and
+                  avg_attempts
                   >= MIN_QB_ATTEMPTS
               ):
                   meaningful = True
 
               elif (
                   position == "RB"
-                  and avg_opportunity
+                  and
+                  avg_opportunity
                   >= MIN_RB_OPPORTUNITIES
               ):
                   meaningful = True
@@ -490,14 +600,15 @@ jobs:
                       "WR",
                       "TE"
                   ]
-                  and avg_targets
+                  and
+                  avg_targets
                   >= MIN_WR_TE_TARGETS
               ):
                   meaningful = True
 
-              player_profiles[
-                  key
-              ] = {
+
+              player_profiles[key] = {
+
                   "player_id":
                       player_id,
 
@@ -513,7 +624,7 @@ jobs:
                       position,
 
                   "games":
-                      len(history),
+                      games,
 
                   "avg_attempts":
                       round2(
@@ -549,26 +660,32 @@ jobs:
               ]
           ]
 
+
+          print("")
           print(
               "Meaningful player profiles:",
-              len(meaningful_profiles)
+              len(
+                  meaningful_profiles
+              )
           )
 
 
           # ========================================================
-          # TEAM-SEASON PLAYER MEMBERSHIP
-          #
-          # This gives us the set of teammates who had
-          # recorded participation for that team/season.
+          # TEAM / SEASON MEMBERSHIP
           # ========================================================
 
           team_season_players = defaultdict(
               set
           )
 
+          team_season_weeks = defaultdict(
+              set
+          )
+
           for row in rows:
-              team = row.get(
-                  "recent_team"
+
+              team = str(
+                  row.get("recent_team")
               )
 
               season = int(
@@ -577,10 +694,26 @@ jobs:
                   )
               )
 
+              week = int(
+                  num(
+                      row.get("week")
+                  )
+              )
+
+              player_id = str(
+                  row.get("player_id")
+              )
+
               team_season_players[
                   (team, season)
               ].add(
-                  row.get("player_id")
+                  player_id
+              )
+
+              team_season_weeks[
+                  (team, season)
+              ].add(
+                  week
               )
 
 
@@ -591,8 +724,11 @@ jobs:
           player_game_lookup = {}
 
           for row in rows:
+
               key = (
-                  row.get("player_id"),
+                  str(
+                      row.get("player_id")
+                  ),
                   int(
                       num(
                           row.get("season")
@@ -603,7 +739,9 @@ jobs:
                           row.get("week")
                       )
                   ),
-                  row.get("recent_team")
+                  str(
+                      row.get("recent_team")
+                  )
               )
 
               player_game_lookup[
@@ -612,47 +750,51 @@ jobs:
 
 
           # ========================================================
-          # LEARN TEAMMATE-OUT SPLITS
+          # LEARN TEAMMATE PARTICIPATION SPLITS
           #
           # IMPORTANT:
           #
-          # Weekly stat absence is NOT the same thing as
-          # official inactive status.
+          # No stat row != confirmed inactive.
           #
-          # Therefore V1 calls these:
+          # V1.1 therefore calls this:
           #
-          # "NO_RECORDED_PARTICIPATION"
+          # NO_RECORDED_PARTICIPATION
           #
-          # rather than "INACTIVE".
           # ========================================================
 
           redistribution = []
 
           trigger_profiles = [
-              p
-              for p
+              profile
+              for profile
               in meaningful_profiles
-              if p["position"]
-              in ["RB", "WR", "TE"]
+              if profile["position"]
+              in [
+                  "RB",
+                  "WR",
+                  "TE"
+              ]
           ]
 
+
           print(
-              "Absence triggers:",
-              len(trigger_profiles)
+              "Potential absence triggers:",
+              len(
+                  trigger_profiles
+              )
           )
+
 
           for trigger in trigger_profiles:
 
-              trigger_id = trigger[
-                  "player_id"
-              ]
+              trigger_id = str(
+                  trigger["player_id"]
+              )
 
-              team = trigger[
-                  "team"
-              ]
+              team = str(
+                  trigger["team"]
+              )
 
-              # Seasons where trigger appeared
-              # for this team.
               trigger_history = (
                   player_team_rows.get(
                       (
@@ -677,6 +819,7 @@ jobs:
                   )
               )
 
+
               for season in seasons:
 
                   team_players = (
@@ -689,40 +832,25 @@ jobs:
                       )
                   )
 
-                  # Weeks where team had at least one
-                  # skill-position stat row.
                   team_weeks = sorted(
-                      set(
-                          int(
-                              num(
-                                  row.get(
-                                      "week"
-                                  )
-                              )
-                          )
-                          for row
-                          in rows
-                          if (
-                              row.get(
-                                  "recent_team"
-                              )
-                              == team
-                              and int(
-                                  num(
-                                      row.get(
-                                          "season"
-                                      )
-                                  )
-                              )
-                              == season
-                          )
+                      team_season_weeks.get(
+                          (
+                              team,
+                              season
+                          ),
+                          set()
                       )
                   )
 
-                  trigger_active_weeks = set()
+                  if not team_weeks:
+                      continue
+
+
+                  trigger_recorded_weeks = set()
 
                   for week in team_weeks:
-                      lookup_key = (
+
+                      trigger_key = (
                           trigger_id,
                           season,
                           week,
@@ -730,33 +858,36 @@ jobs:
                       )
 
                       if (
-                          lookup_key
+                          trigger_key
                           in player_game_lookup
                       ):
-                          trigger_active_weeks.add(
+                          trigger_recorded_weeks.add(
                               week
                           )
+
 
                   trigger_missing_weeks = [
                       week
                       for week
                       in team_weeks
                       if week
-                      not in trigger_active_weeks
+                      not in trigger_recorded_weeks
                   ]
 
-                  if not trigger_missing_weeks:
+
+                  if (
+                      not trigger_recorded_weeks
+                      or
+                      not trigger_missing_weeks
+                  ):
                       continue
 
-                  if not trigger_active_weeks:
-                      continue
-
-
-                  # ----------------------------------------------
-                  # Compare every teammate.
-                  # ----------------------------------------------
 
                   for teammate_id in team_players:
+
+                      teammate_id = str(
+                          teammate_id
+                      )
 
                       if (
                           teammate_id
@@ -764,8 +895,10 @@ jobs:
                       ):
                           continue
 
+
                       with_rows = []
                       without_rows = []
+
 
                       for week in team_weeks:
 
@@ -787,7 +920,7 @@ jobs:
 
                           if (
                               week
-                              in trigger_active_weeks
+                              in trigger_recorded_weeks
                           ):
                               with_rows.append(
                                   teammate_row
@@ -812,30 +945,28 @@ jobs:
                           continue
 
 
-                      latest_teammate = (
-                          sorted(
+                      latest_teammate = sorted(
+                          (
                               with_rows
-                              + without_rows,
-                              key=lambda r: (
-                                  num(
-                                      r.get(
-                                          "season"
-                                      )
-                                  ),
-                                  num(
-                                      r.get(
-                                          "week"
-                                      )
-                                  )
+                              + without_rows
+                          ),
+                          key=lambda r: (
+                              num(
+                                  r.get("season")
+                              ),
+                              num(
+                                  r.get("week")
                               )
-                          )[-1]
-                      )
+                          )
+                      )[-1]
+
 
                       teammate_position = (
                           latest_teammate.get(
                               "position"
                           )
                       )
+
 
                       if teammate_position not in [
                           "QB",
@@ -846,10 +977,8 @@ jobs:
                           continue
 
 
-                      def avg(
-                          sample,
-                          column
-                      ):
+                      def avg(sample, column):
+
                           if not sample:
                               return 0.0
 
@@ -864,344 +993,326 @@ jobs:
                           )
 
 
-                      with_targets = avg(
-                          with_rows,
-                          "targets"
-                      )
-
-                      without_targets = avg(
-                          without_rows,
-                          "targets"
-                      )
-
-                      with_carries = avg(
-                          with_rows,
-                          "carries"
-                      )
-
-                      without_carries = avg(
-                          without_rows,
-                          "carries"
-                      )
-
-                      with_attempts = avg(
-                          with_rows,
-                          "attempts"
-                      )
-
-                      without_attempts = avg(
-                          without_rows,
-                          "attempts"
-                      )
-
-                      with_air = avg(
-                          with_rows,
-                          "receiving_air_yards"
-                      )
-
-                      without_air = avg(
-                          without_rows,
-                          "receiving_air_yards"
-                      )
-
-                      with_rec_yards = avg(
-                          with_rows,
-                          "receiving_yards"
-                      )
-
-                      without_rec_yards = avg(
-                          without_rows,
-                          "receiving_yards"
-                      )
-
-                      with_rush_yards = avg(
-                          with_rows,
+                      metrics = [
+                          "targets",
+                          "carries",
+                          "attempts",
+                          "receiving_air_yards",
+                          "receptions",
+                          "receiving_yards",
                           "rushing_yards"
-                      )
-
-                      without_rush_yards = avg(
-                          without_rows,
-                          "rushing_yards"
-                      )
-
-                      with_receptions = avg(
-                          with_rows,
-                          "receptions"
-                      )
-
-                      without_receptions = avg(
-                          without_rows,
-                          "receptions"
-                      )
-
-                      target_delta = (
-                          without_targets
-                          - with_targets
-                      )
-
-                      carry_delta = (
-                          without_carries
-                          - with_carries
-                      )
-
-                      attempt_delta = (
-                          without_attempts
-                          - with_attempts
-                      )
-
-                      air_delta = (
-                          without_air
-                          - with_air
-                      )
-
-                      receiving_yards_delta = (
-                          without_rec_yards
-                          - with_rec_yards
-                      )
-
-                      rushing_yards_delta = (
-                          without_rush_yards
-                          - with_rush_yards
-                      )
-
-                      receptions_delta = (
-                          without_receptions
-                          - with_receptions
-                      )
+                      ]
 
 
-                      # ------------------------------------------
-                      # EVIDENCE STRENGTH
-                      #
-                      # Not predictive confidence.
-                      # Describes sample depth only.
-                      # ------------------------------------------
+                      with_values = {
+                          metric:
+                              avg(
+                                  with_rows,
+                                  metric
+                              )
+                          for metric
+                          in metrics
+                      }
 
-                      without_n = len(
-                          without_rows
-                      )
+                      without_values = {
+                          metric:
+                              avg(
+                                  without_rows,
+                                  metric
+                              )
+                          for metric
+                          in metrics
+                      }
+
+
+                      change = {
+                          metric:
+                              (
+                                  without_values[
+                                      metric
+                                  ]
+                                  -
+                                  with_values[
+                                      metric
+                                  ]
+                              )
+                          for metric
+                          in metrics
+                      }
+
 
                       with_n = len(
                           with_rows
                       )
 
+                      without_n = len(
+                          without_rows
+                      )
+
+
                       if (
                           without_n >= 6
-                          and with_n >= 6
+                          and
+                          with_n >= 6
                       ):
-                          evidence = "STRONG_SAMPLE"
+                          evidence = (
+                              "STRONG_SAMPLE"
+                          )
 
                       elif (
                           without_n >= 3
-                          and with_n >= 4
+                          and
+                          with_n >= 4
                       ):
-                          evidence = "MODERATE_SAMPLE"
+                          evidence = (
+                              "MODERATE_SAMPLE"
+                          )
 
                       else:
-                          evidence = "LIMITED_SAMPLE"
+                          evidence = (
+                              "LIMITED_SAMPLE"
+                          )
 
-
-                      # ------------------------------------------
-                      # OPPORTUNITY SIGNAL
-                      #
-                      # Ranking score only.
-                      # Not a probability.
-                      # ------------------------------------------
 
                       signal = (
                           max(
-                              target_delta,
+                              change["targets"],
                               0
                           ) * 10
+
                           +
+
                           max(
-                              carry_delta,
+                              change["carries"],
                               0
                           ) * 5
+
                           +
+
                           max(
-                              air_delta,
+                              change[
+                                  "receiving_air_yards"
+                              ],
                               0
                           ) * 0.08
                       )
 
-                      redistribution.append(
-                          {
-                              "season":
-                                  season,
 
-                              "team":
-                                  team,
+                      redistribution.append({
 
-                              "absent_player_id":
-                                  trigger_id,
+                          "season":
+                              season,
 
-                              "absent_player":
-                                  trigger[
-                                      "player"
-                                  ],
+                          "team":
+                              team,
 
-                              "absent_position":
-                                  trigger[
-                                      "position"
-                                  ],
+                          "absent_player_id":
+                              trigger_id,
 
-                              "absence_definition":
-                                  (
-                                      "NO_RECORDED_"
-                                      "PARTICIPATION"
-                                  ),
+                          "absent_player":
+                              trigger["player"],
 
-                              "teammate_player_id":
-                                  teammate_id,
+                          "absent_position":
+                              trigger[
+                                  "position"
+                              ],
 
-                              "teammate_player":
-                                  latest_teammate.get(
-                                      "player_display_name"
-                                  ),
+                          "absence_definition":
+                              (
+                                  "NO_RECORDED_"
+                                  "PARTICIPATION"
+                              ),
 
-                              "teammate_position":
-                                  teammate_position,
+                          "teammate_player_id":
+                              teammate_id,
 
-                              "games_with":
-                                  with_n,
+                          "teammate_player":
+                              latest_teammate.get(
+                                  "player_display_name"
+                              ),
 
-                              "games_without":
-                                  without_n,
+                          "teammate_position":
+                              teammate_position,
 
-                              "evidence":
-                                  evidence,
+                          "games_with":
+                              with_n,
 
-                              "with_player": {
-                                  "targets":
-                                      round2(
-                                          with_targets
-                                      ),
+                          "games_without":
+                              without_n,
 
-                                  "carries":
-                                      round2(
-                                          with_carries
-                                      ),
+                          "evidence":
+                              evidence,
 
-                                  "attempts":
-                                      round2(
-                                          with_attempts
-                                      ),
+                          "with_player": {
 
-                                  "air_yards":
-                                      round2(
-                                          with_air
-                                      ),
-
-                                  "receptions":
-                                      round2(
-                                          with_receptions
-                                      ),
-
-                                  "receiving_yards":
-                                      round2(
-                                          with_rec_yards
-                                      ),
-
-                                  "rushing_yards":
-                                      round2(
-                                          with_rush_yards
-                                      )
-                              },
-
-                              "without_player": {
-                                  "targets":
-                                      round2(
-                                          without_targets
-                                      ),
-
-                                  "carries":
-                                      round2(
-                                          without_carries
-                                      ),
-
-                                  "attempts":
-                                      round2(
-                                          without_attempts
-                                      ),
-
-                                  "air_yards":
-                                      round2(
-                                          without_air
-                                      ),
-
-                                  "receptions":
-                                      round2(
-                                          without_receptions
-                                      ),
-
-                                  "receiving_yards":
-                                      round2(
-                                          without_rec_yards
-                                      ),
-
-                                  "rushing_yards":
-                                      round2(
-                                          without_rush_yards
-                                      )
-                              },
-
-                              "change": {
-                                  "targets":
-                                      round2(
-                                          target_delta
-                                      ),
-
-                                  "carries":
-                                      round2(
-                                          carry_delta
-                                      ),
-
-                                  "attempts":
-                                      round2(
-                                          attempt_delta
-                                      ),
-
-                                  "air_yards":
-                                      round2(
-                                          air_delta
-                                      ),
-
-                                  "receptions":
-                                      round2(
-                                          receptions_delta
-                                      ),
-
-                                  "receiving_yards":
-                                      round2(
-                                          receiving_yards_delta
-                                      ),
-
-                                  "rushing_yards":
-                                      round2(
-                                          rushing_yards_delta
-                                      )
-                              },
-
-                              "opportunity_signal":
+                              "targets":
                                   round2(
-                                      signal
+                                      with_values[
+                                          "targets"
+                                      ]
+                                  ),
+
+                              "carries":
+                                  round2(
+                                      with_values[
+                                          "carries"
+                                      ]
+                                  ),
+
+                              "attempts":
+                                  round2(
+                                      with_values[
+                                          "attempts"
+                                      ]
+                                  ),
+
+                              "air_yards":
+                                  round2(
+                                      with_values[
+                                          "receiving_air_yards"
+                                      ]
+                                  ),
+
+                              "receptions":
+                                  round2(
+                                      with_values[
+                                          "receptions"
+                                      ]
+                                  ),
+
+                              "receiving_yards":
+                                  round2(
+                                      with_values[
+                                          "receiving_yards"
+                                      ]
+                                  ),
+
+                              "rushing_yards":
+                                  round2(
+                                      with_values[
+                                          "rushing_yards"
+                                      ]
                                   )
-                          }
-                      )
+                          },
 
+                          "without_player": {
 
-          # ========================================================
-          # SORT REDISTRIBUTION RESULTS
-          # ========================================================
+                              "targets":
+                                  round2(
+                                      without_values[
+                                          "targets"
+                                      ]
+                                  ),
+
+                              "carries":
+                                  round2(
+                                      without_values[
+                                          "carries"
+                                      ]
+                                  ),
+
+                              "attempts":
+                                  round2(
+                                      without_values[
+                                          "attempts"
+                                      ]
+                                  ),
+
+                              "air_yards":
+                                  round2(
+                                      without_values[
+                                          "receiving_air_yards"
+                                      ]
+                                  ),
+
+                              "receptions":
+                                  round2(
+                                      without_values[
+                                          "receptions"
+                                      ]
+                                  ),
+
+                              "receiving_yards":
+                                  round2(
+                                      without_values[
+                                          "receiving_yards"
+                                      ]
+                                  ),
+
+                              "rushing_yards":
+                                  round2(
+                                      without_values[
+                                          "rushing_yards"
+                                      ]
+                                  )
+                          },
+
+                          "change": {
+
+                              "targets":
+                                  round2(
+                                      change[
+                                          "targets"
+                                      ]
+                                  ),
+
+                              "carries":
+                                  round2(
+                                      change[
+                                          "carries"
+                                      ]
+                                  ),
+
+                              "attempts":
+                                  round2(
+                                      change[
+                                          "attempts"
+                                      ]
+                                  ),
+
+                              "air_yards":
+                                  round2(
+                                      change[
+                                          "receiving_air_yards"
+                                      ]
+                                  ),
+
+                              "receptions":
+                                  round2(
+                                      change[
+                                          "receptions"
+                                      ]
+                                  ),
+
+                              "receiving_yards":
+                                  round2(
+                                      change[
+                                          "receiving_yards"
+                                      ]
+                                  ),
+
+                              "rushing_yards":
+                                  round2(
+                                      change[
+                                          "rushing_yards"
+                                      ]
+                                  )
+                          },
+
+                          "opportunity_signal":
+                              round2(
+                                  signal
+                              )
+                      })
+
 
           redistribution.sort(
-              key=lambda x: (
-                  x.get(
+              key=lambda item: (
+                  item.get(
                       "opportunity_signal",
                       0
                   ),
-                  x.get(
+                  item.get(
                       "games_without",
                       0
                   )
@@ -1225,6 +1336,7 @@ jobs:
               == CURRENT_SEASON
           ]
 
+
           latest_week = max(
               [
                   int(
@@ -1232,28 +1344,38 @@ jobs:
                           row.get("week")
                       )
                   )
-                  for row in current_rows
+                  for row
+                  in current_rows
               ],
               default=0
           )
 
-          current_profiles = []
 
           current_player_team = defaultdict(
               list
           )
 
           for row in current_rows:
+
               current_player_team[
                   (
-                      row.get("player_id"),
-                      row.get("recent_team")
+                      str(
+                          row.get("player_id")
+                      ),
+                      str(
+                          row.get("recent_team")
+                      )
                   )
               ].append(row)
+
+
+          current_profiles = []
+
 
           for key, history in (
               current_player_team.items()
           ):
+
               player_id, team = key
 
               latest = sorted(
@@ -1264,80 +1386,82 @@ jobs:
                       )
               )[-1]
 
-              current_profiles.append(
-                  {
-                      "player_id":
-                          player_id,
+              games = len(history)
 
-                      "player":
-                          latest.get(
-                              "player_display_name"
-                          ),
 
-                      "team":
-                          team,
+              current_profiles.append({
 
-                      "position":
-                          latest.get(
-                              "position"
-                          ),
+                  "player_id":
+                      player_id,
 
-                      "games_recorded":
-                          len(history),
+                  "player":
+                      latest.get(
+                          "player_display_name"
+                      ),
 
-                      "avg_targets":
-                          round2(
-                              sum(
-                                  num(
-                                      r.get(
-                                          "targets"
-                                      )
+                  "team":
+                      team,
+
+                  "position":
+                      latest.get(
+                          "position"
+                      ),
+
+                  "games_recorded":
+                      games,
+
+                  "avg_targets":
+                      round2(
+                          sum(
+                              num(
+                                  r.get(
+                                      "targets"
                                   )
-                                  for r in history
                               )
-                              / len(history)
-                          ),
-
-                      "avg_carries":
-                          round2(
-                              sum(
-                                  num(
-                                      r.get(
-                                          "carries"
-                                      )
-                                  )
-                                  for r in history
-                              )
-                              / len(history)
-                          ),
-
-                      "avg_attempts":
-                          round2(
-                              sum(
-                                  num(
-                                      r.get(
-                                          "attempts"
-                                      )
-                                  )
-                                  for r in history
-                              )
-                              / len(history)
-                          ),
-
-                      "avg_opportunities":
-                          round2(
-                              sum(
-                                  num(
-                                      r.get(
-                                          "_opportunities"
-                                      )
-                                  )
-                                  for r in history
-                              )
-                              / len(history)
+                              for r in history
                           )
-                  }
-              )
+                          / games
+                      ),
+
+                  "avg_carries":
+                      round2(
+                          sum(
+                              num(
+                                  r.get(
+                                      "carries"
+                                  )
+                              )
+                              for r in history
+                          )
+                          / games
+                      ),
+
+                  "avg_attempts":
+                      round2(
+                          sum(
+                              num(
+                                  r.get(
+                                      "attempts"
+                                  )
+                              )
+                              for r in history
+                          )
+                          / games
+                      ),
+
+                  "avg_opportunities":
+                      round2(
+                          sum(
+                              num(
+                                  r.get(
+                                      "_opportunities"
+                                  )
+                              )
+                              for r in history
+                          )
+                          / games
+                      )
+              })
 
 
           # ========================================================
@@ -1367,8 +1491,12 @@ jobs:
 
 
           output = {
+
               "engine":
-                  "JPRO_OPPORTUNITY_REDISTRIBUTION_V1",
+                  (
+                      "JPRO_OPPORTUNITY_"
+                      "REDISTRIBUTION_V1_1"
+                  ),
 
               "status":
                   "AUDIT_READY",
@@ -1382,6 +1510,20 @@ jobs:
               "historical_seasons":
                   HISTORICAL_SEASONS,
 
+              "schema": {
+                  "team_source_column":
+                      team_col,
+
+                  "player_id_source_column":
+                      player_id_col,
+
+                  "player_name_source_column":
+                      player_name_col,
+
+                  "position_source_column":
+                      position_col
+              },
+
               "method":
                   (
                       "NFLVERSE_WEEKLY_"
@@ -1389,19 +1531,19 @@ jobs:
                   ),
 
               "important_limitations": [
+
                   (
-                      "Missing weekly player stat "
-                      "participation is not proof "
-                      "that a player was officially inactive."
+                      "Missing weekly player stats "
+                      "do not prove official inactive status."
                   ),
 
                   (
-                      "V1 does not modify live "
+                      "V1.1 does not modify live "
                       "JPro projections."
                   ),
 
                   (
-                      "Historical teammate-out "
+                      "Historical teammate participation "
                       "splits are descriptive evidence "
                       "and are not automatically causal."
                   ),
@@ -1413,6 +1555,7 @@ jobs:
               ],
 
               "summary": {
+
                   "skill_position_rows":
                       len(rows),
 
@@ -1452,20 +1595,18 @@ jobs:
           }
 
 
-          # ========================================================
-          # WRITE
-          # ========================================================
-
           os.makedirs(
               "data",
               exist_ok=True
           )
+
 
           with open(
               OUTPUT_PATH,
               "w",
               encoding="utf-8"
           ) as f:
+
               json.dump(
                   output,
                   f,
@@ -1474,7 +1615,7 @@ jobs:
 
 
           # ========================================================
-          # CONSOLE PREVIEW
+          # PREVIEW
           # ========================================================
 
           print("")
@@ -1483,13 +1624,27 @@ jobs:
           print("=" * 76)
 
           print(
+              "Normalized team source:",
+              team_col
+          )
+
+          print(
               "Current source week:",
               latest_week
           )
 
           print(
+              "Current player profiles:",
+              len(
+                  current_profiles
+              )
+          )
+
+          print(
               "Relationships:",
-              len(redistribution)
+              len(
+                  redistribution
+              )
           )
 
           print(
@@ -1507,10 +1662,12 @@ jobs:
               limited_count
           )
 
+
           print("")
           print("=" * 76)
           print("TOP OPPORTUNITY SHIFTS")
           print("=" * 76)
+
 
           for i, item in enumerate(
               redistribution[:30],
@@ -1518,6 +1675,7 @@ jobs:
           ):
 
               print("")
+
               print(
                   f"#{i}",
                   item["team"],
@@ -1583,6 +1741,7 @@ jobs:
                   ]
               )
 
+
           print("")
           print(
               "Saved:",
@@ -1590,6 +1749,7 @@ jobs:
           )
 
           PY
+
 
       # ============================================================
       # VERIFY
@@ -1601,19 +1761,23 @@ jobs:
           import json
           import os
 
+
           PATH = (
               "data/"
               "jpro-opportunity-redistribution.json"
           )
 
+
           print("=" * 76)
-          print("VERIFY OPPORTUNITY REDISTRIBUTION V1")
+          print("VERIFY OPPORTUNITY REDISTRIBUTION V1.1")
           print("=" * 76)
+
 
           if not os.path.exists(PATH):
               raise RuntimeError(
                   "Opportunity output missing."
               )
+
 
           with open(
               PATH,
@@ -1622,14 +1786,16 @@ jobs:
           ) as f:
               data = json.load(f)
 
+
           if (
               data.get("engine")
               !=
-              "JPRO_OPPORTUNITY_REDISTRIBUTION_V1"
+              "JPRO_OPPORTUNITY_REDISTRIBUTION_V1_1"
           ):
               raise RuntimeError(
                   "Wrong engine version."
               )
+
 
           if (
               data.get("status")
@@ -1639,31 +1805,51 @@ jobs:
                   "Wrong engine status."
               )
 
+
+          schema = data.get(
+              "schema",
+              {}
+          )
+
+
+          if not schema.get(
+              "team_source_column"
+          ):
+              raise RuntimeError(
+                  "Team schema was not detected."
+              )
+
+
           relationships = data.get(
               "redistribution_relationships",
               []
           )
+
 
           profiles = data.get(
               "current_player_profiles",
               []
           )
 
+
           if not profiles:
               raise RuntimeError(
                   "No current player profiles."
               )
+
 
           if not relationships:
               raise RuntimeError(
                   "No redistribution relationships."
               )
 
+
           valid_evidence = {
               "STRONG_SAMPLE",
               "MODERATE_SAMPLE",
               "LIMITED_SAMPLE"
           }
+
 
           for row in relationships:
 
@@ -1674,6 +1860,7 @@ jobs:
                   raise RuntimeError(
                       "Invalid evidence label."
                   )
+
 
               if (
                   row.get(
@@ -1686,18 +1873,36 @@ jobs:
                       "Invalid absence definition."
                   )
 
+
               if (
-                  row.get("absent_player_id")
+                  str(
+                      row.get(
+                          "absent_player_id"
+                      )
+                  )
                   ==
-                  row.get("teammate_player_id")
+                  str(
+                      row.get(
+                          "teammate_player_id"
+                      )
+                  )
               ):
                   raise RuntimeError(
                       "Player matched to self."
                   )
 
+
           summary = data.get(
               "summary",
               {}
+          )
+
+
+          print(
+              "Team source column:",
+              schema.get(
+                  "team_source_column"
+              )
           )
 
           print(
@@ -1738,16 +1943,20 @@ jobs:
               )
           )
 
+
           print("")
+          print("=" * 76)
           print(
               "JPRO OPPORTUNITY "
-              "REDISTRIBUTION V1 VERIFIED"
+              "REDISTRIBUTION V1.1 VERIFIED"
           )
+          print("=" * 76)
 
           PY
 
+
       # ============================================================
-      # SAVE SEPARATE AUDIT FILE
+      # SAVE
       # ============================================================
 
       - name: Save Opportunity Redistribution V1
@@ -1762,7 +1971,7 @@ jobs:
             echo "No changes to commit."
           else
             git commit \
-              -m "Add JPro Opportunity Redistribution V1"
+              -m "Add JPro Opportunity Redistribution V1.1"
 
             git push
           fi
