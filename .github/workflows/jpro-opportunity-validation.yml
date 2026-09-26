@@ -1,0 +1,894 @@
+name: JPro Opportunity Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-opportunity:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get JPro
+        uses: actions/checkout@v4
+
+      - name: Validate Opportunity Relationships
+        run: |
+          python <<'PY'
+          import json
+          import math
+          import statistics
+          from collections import Counter, defaultdict
+
+          PATH = "data/jpro-opportunity-redistribution.json"
+
+          print("=" * 78)
+          print("JPRO OPPORTUNITY REDISTRIBUTION — VALIDATION")
+          print("=" * 78)
+
+          with open(PATH, "r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          relationships = data.get(
+              "redistribution_relationships",
+              []
+          )
+
+          print("")
+          print("Relationships loaded:", len(relationships))
+
+          if not relationships:
+              raise RuntimeError(
+                  "No redistribution relationships found."
+              )
+
+
+          # ==========================================================
+          # HELPERS
+          # ==========================================================
+
+          def num(value, default=0.0):
+              try:
+                  value = float(value)
+
+                  if math.isnan(value):
+                      return default
+
+                  if math.isinf(value):
+                      return default
+
+                  return value
+
+              except Exception:
+                  return default
+
+
+          def clamp(value, low, high):
+              return max(
+                  low,
+                  min(
+                      high,
+                      value
+                  )
+              )
+
+
+          def median(values):
+              values = [
+                  num(x)
+                  for x in values
+              ]
+
+              if not values:
+                  return 0.0
+
+              return statistics.median(values)
+
+
+          # ==========================================================
+          # FILTER TO USABLE EVIDENCE
+          #
+          # LIMITED_SAMPLE is intentionally excluded.
+          # ==========================================================
+
+          usable = [
+              row
+              for row in relationships
+              if row.get("evidence")
+              in {
+                  "STRONG_SAMPLE",
+                  "MODERATE_SAMPLE"
+              }
+          ]
+
+          strong = [
+              row
+              for row in usable
+              if row.get("evidence")
+              == "STRONG_SAMPLE"
+          ]
+
+          moderate = [
+              row
+              for row in usable
+              if row.get("evidence")
+              == "MODERATE_SAMPLE"
+          ]
+
+
+          print("Strong relationships:", len(strong))
+          print("Moderate relationships:", len(moderate))
+          print("Usable relationships:", len(usable))
+
+
+          if not usable:
+              raise RuntimeError(
+                  "No strong/moderate relationships available."
+              )
+
+
+          # ==========================================================
+          # BASIC SANITY TESTS
+          # ==========================================================
+
+          failures = []
+
+          for row in usable:
+
+              if (
+                  str(row.get("absent_player_id"))
+                  ==
+                  str(row.get("teammate_player_id"))
+              ):
+                  failures.append(
+                      "SELF_MATCH"
+                  )
+
+              if num(row.get("games_with")) <= 0:
+                  failures.append(
+                      "NO_GAMES_WITH"
+                  )
+
+              if num(row.get("games_without")) <= 0:
+                  failures.append(
+                      "NO_GAMES_WITHOUT"
+                  )
+
+              if (
+                  row.get("absence_definition")
+                  !=
+                  "NO_RECORDED_PARTICIPATION"
+              ):
+                  failures.append(
+                      "BAD_ABSENCE_DEFINITION"
+                  )
+
+
+          if failures:
+              counts = Counter(failures)
+
+              raise RuntimeError(
+                  "Validation failures: "
+                  + str(dict(counts))
+              )
+
+
+          # ==========================================================
+          # DUPLICATE CHECK
+          # ==========================================================
+
+          relationship_keys = []
+
+          for row in usable:
+
+              relationship_keys.append(
+                  (
+                      row.get("season"),
+                      row.get("team"),
+                      row.get("absent_player_id"),
+                      row.get("teammate_player_id")
+                  )
+              )
+
+          duplicates = (
+              len(relationship_keys)
+              -
+              len(set(relationship_keys))
+          )
+
+          print("Duplicate relationships:", duplicates)
+
+          if duplicates:
+              raise RuntimeError(
+                  "Duplicate redistribution relationships found."
+              )
+
+
+          # ==========================================================
+          # SAMPLE QUALITY
+          # ==========================================================
+
+          strong_without = [
+              num(row.get("games_without"))
+              for row in strong
+          ]
+
+          strong_with = [
+              num(row.get("games_with"))
+              for row in strong
+          ]
+
+          moderate_without = [
+              num(row.get("games_without"))
+              for row in moderate
+          ]
+
+          moderate_with = [
+              num(row.get("games_with"))
+              for row in moderate
+          ]
+
+
+          print("")
+          print("=" * 78)
+          print("SAMPLE QUALITY")
+          print("=" * 78)
+
+          print(
+              "Strong median games WITH:",
+              median(strong_with)
+          )
+
+          print(
+              "Strong median games WITHOUT:",
+              median(strong_without)
+          )
+
+          print(
+              "Moderate median games WITH:",
+              median(moderate_with)
+          )
+
+          print(
+              "Moderate median games WITHOUT:",
+              median(moderate_without)
+          )
+
+
+          # ==========================================================
+          # EXTREME / SUSPICIOUS CHANGE FLAGS
+          #
+          # These are audit flags — not automatic proof of bad data.
+          # ==========================================================
+
+          suspicious = []
+
+          for row in usable:
+
+              change = row.get(
+                  "change",
+                  {}
+              )
+
+              target_delta = num(
+                  change.get("targets")
+              )
+
+              carry_delta = num(
+                  change.get("carries")
+              )
+
+              air_delta = num(
+                  change.get("air_yards")
+              )
+
+              rec_yard_delta = num(
+                  change.get("receiving_yards")
+              )
+
+              rush_yard_delta = num(
+                  change.get("rushing_yards")
+              )
+
+              flags = []
+
+              if abs(target_delta) > 8:
+                  flags.append(
+                      "EXTREME_TARGET_CHANGE"
+                  )
+
+              if abs(carry_delta) > 15:
+                  flags.append(
+                      "EXTREME_CARRY_CHANGE"
+                  )
+
+              if abs(air_delta) > 150:
+                  flags.append(
+                      "EXTREME_AIR_YARD_CHANGE"
+                  )
+
+              if abs(rec_yard_delta) > 120:
+                  flags.append(
+                      "EXTREME_REC_YARD_CHANGE"
+                  )
+
+              if abs(rush_yard_delta) > 150:
+                  flags.append(
+                      "EXTREME_RUSH_YARD_CHANGE"
+                  )
+
+              if flags:
+                  suspicious.append(
+                      {
+                          "team":
+                              row.get("team"),
+
+                          "season":
+                              row.get("season"),
+
+                          "absent_player":
+                              row.get("absent_player"),
+
+                          "absent_position":
+                              row.get("absent_position"),
+
+                          "teammate":
+                              row.get("teammate_player"),
+
+                          "teammate_position":
+                              row.get("teammate_position"),
+
+                          "games_with":
+                              row.get("games_with"),
+
+                          "games_without":
+                              row.get("games_without"),
+
+                          "evidence":
+                              row.get("evidence"),
+
+                          "flags":
+                              flags,
+
+                          "change":
+                              change
+                      }
+                  )
+
+
+          print("")
+          print(
+              "Relationships with extreme-change flags:",
+              len(suspicious)
+          )
+
+
+          # ==========================================================
+          # DIRECTIONAL OPPORTUNITY SIGNAL
+          #
+          # We care more about opportunity than raw yards.
+          # ==========================================================
+
+          scored = []
+
+          for row in usable:
+
+              change = row.get(
+                  "change",
+                  {}
+              )
+
+              target_delta = num(
+                  change.get("targets")
+              )
+
+              carry_delta = num(
+                  change.get("carries")
+              )
+
+              air_delta = num(
+                  change.get("air_yards")
+              )
+
+              reception_delta = num(
+                  change.get("receptions")
+              )
+
+              rec_yard_delta = num(
+                  change.get("receiving_yards")
+              )
+
+              rush_yard_delta = num(
+                  change.get("rushing_yards")
+              )
+
+              games_without = num(
+                  row.get("games_without")
+              )
+
+              games_with = num(
+                  row.get("games_with")
+              )
+
+
+              # ------------------------------------------------------
+              # Sample confidence
+              # ------------------------------------------------------
+
+              if row.get("evidence") == "STRONG_SAMPLE":
+                  base_confidence = 1.00
+              else:
+                  base_confidence = 0.72
+
+
+              sample_balance = clamp(
+                  min(
+                      games_without,
+                      games_with
+                  )
+                  /
+                  max(
+                      games_without,
+                      games_with
+                  ),
+                  0.20,
+                  1.00
+              )
+
+
+              confidence = (
+                  base_confidence
+                  *
+                  (
+                      0.65
+                      +
+                      0.35 * sample_balance
+                  )
+              )
+
+
+              # ------------------------------------------------------
+              # Opportunity signal
+              #
+              # Production changes are intentionally lower weight.
+              # ------------------------------------------------------
+
+              opportunity_component = (
+                  max(target_delta, 0) * 12
+                  +
+                  max(carry_delta, 0) * 7
+                  +
+                  max(air_delta, 0) * 0.10
+              )
+
+              production_component = (
+                  max(reception_delta, 0) * 2
+                  +
+                  max(rec_yard_delta, 0) * 0.10
+                  +
+                  max(rush_yard_delta, 0) * 0.08
+              )
+
+              raw_score = (
+                  opportunity_component
+                  +
+                  production_component
+              )
+
+              validated_score = (
+                  raw_score
+                  *
+                  confidence
+              )
+
+
+              # ------------------------------------------------------
+              # Signal classification
+              # ------------------------------------------------------
+
+              positive_inputs = sum(
+                  [
+                      target_delta > 0.5,
+                      carry_delta > 1.0,
+                      air_delta > 10
+                  ]
+              )
+
+
+              if (
+                  validated_score >= 35
+                  and
+                  positive_inputs >= 2
+              ):
+                  signal = "STRONG_REDISTRIBUTION"
+
+              elif (
+                  validated_score >= 18
+                  and
+                  positive_inputs >= 1
+              ):
+                  signal = "POSSIBLE_REDISTRIBUTION"
+
+              else:
+                  signal = "WEAK_OR_NO_SIGNAL"
+
+
+              scored.append(
+                  {
+                      **row,
+
+                      "validation": {
+                          "sample_confidence":
+                              round(
+                                  confidence,
+                                  3
+                              ),
+
+                          "raw_score":
+                              round(
+                                  raw_score,
+                                  2
+                              ),
+
+                          "validated_score":
+                              round(
+                                  validated_score,
+                                  2
+                              ),
+
+                          "positive_opportunity_inputs":
+                              positive_inputs,
+
+                          "signal":
+                              signal
+                      }
+                  }
+              )
+
+
+          # ==========================================================
+          # SORT
+          # ==========================================================
+
+          scored.sort(
+              key=lambda row:
+                  row.get(
+                      "validation",
+                      {}
+                  ).get(
+                      "validated_score",
+                      0
+                  ),
+              reverse=True
+          )
+
+
+          # ==========================================================
+          # COUNTS
+          # ==========================================================
+
+          signal_counts = Counter(
+              row["validation"]["signal"]
+              for row in scored
+          )
+
+
+          print("")
+          print("=" * 78)
+          print("VALIDATED SIGNAL COUNTS")
+          print("=" * 78)
+
+          for key in [
+              "STRONG_REDISTRIBUTION",
+              "POSSIBLE_REDISTRIBUTION",
+              "WEAK_OR_NO_SIGNAL"
+          ]:
+              print(
+                  key + ":",
+                  signal_counts.get(
+                      key,
+                      0
+                  )
+              )
+
+
+          # ==========================================================
+          # TOP 30
+          # ==========================================================
+
+          print("")
+          print("=" * 78)
+          print("TOP 30 VALIDATED OPPORTUNITY SHIFTS")
+          print("=" * 78)
+
+
+          for index, row in enumerate(
+              scored[:30],
+              start=1
+          ):
+
+              change = row.get(
+                  "change",
+                  {}
+              )
+
+              validation = row.get(
+                  "validation",
+                  {}
+              )
+
+              print("")
+              print(
+                  f"#{index}",
+                  row.get("team"),
+                  row.get("season")
+              )
+
+              print(
+                  "   ABSENT:",
+                  row.get("absent_player"),
+                  "("
+                  + str(
+                      row.get("absent_position")
+                  )
+                  + ")"
+              )
+
+              print(
+                  "   BENEFICIARY:",
+                  row.get("teammate_player"),
+                  "("
+                  + str(
+                      row.get("teammate_position")
+                  )
+                  + ")"
+              )
+
+              print(
+                  "   EVIDENCE:",
+                  row.get("evidence")
+              )
+
+              print(
+                  "   GAMES:",
+                  str(
+                      row.get("games_with")
+                  )
+                  + " with / "
+                  + str(
+                      row.get("games_without")
+                  )
+                  + " without"
+              )
+
+              print(
+                  "   TARGETS:",
+                  change.get("targets")
+              )
+
+              print(
+                  "   CARRIES:",
+                  change.get("carries")
+              )
+
+              print(
+                  "   AIR YARDS:",
+                  change.get("air_yards")
+              )
+
+              print(
+                  "   RECEPTIONS:",
+                  change.get("receptions")
+              )
+
+              print(
+                  "   REC YARDS:",
+                  change.get("receiving_yards")
+              )
+
+              print(
+                  "   RUSH YARDS:",
+                  change.get("rushing_yards")
+              )
+
+              print(
+                  "   CONFIDENCE:",
+                  validation.get(
+                      "sample_confidence"
+                  )
+              )
+
+              print(
+                  "   VALIDATED SCORE:",
+                  validation.get(
+                      "validated_score"
+                  )
+              )
+
+              print(
+                  "   SIGNAL:",
+                  validation.get(
+                      "signal"
+                  )
+              )
+
+
+          # ==========================================================
+          # TEAM DISTRIBUTION AUDIT
+          # ==========================================================
+
+          team_counts = Counter(
+              row.get("team")
+              for row in scored
+          )
+
+
+          print("")
+          print("=" * 78)
+          print("TEAM COVERAGE")
+          print("=" * 78)
+
+          print(
+              "Teams represented:",
+              len(team_counts)
+          )
+
+
+          for team, count in sorted(
+              team_counts.items()
+          ):
+              print(
+                  team,
+                  count
+              )
+
+
+          # ==========================================================
+          # POSITION PAIRS
+          # ==========================================================
+
+          position_pairs = Counter(
+              (
+                  row.get("absent_position"),
+                  row.get("teammate_position")
+              )
+              for row in scored
+          )
+
+
+          print("")
+          print("=" * 78)
+          print("MOST COMMON POSITION REDISTRIBUTIONS")
+          print("=" * 78)
+
+
+          for pair, count in (
+              position_pairs.most_common(12)
+          ):
+              print(
+                  str(pair[0])
+                  + " -> "
+                  + str(pair[1])
+                  + ":",
+                  count
+              )
+
+
+          # ==========================================================
+          # SAVE VALIDATION REPORT
+          # ==========================================================
+
+          report = {
+              "engine":
+                  "JPRO_OPPORTUNITY_VALIDATION_V1",
+
+              "status":
+                  "VALIDATION_COMPLETE",
+
+              "source_engine":
+                  data.get("engine"),
+
+              "important_note":
+                  (
+                      "No recorded weekly participation "
+                      "is not equivalent to confirmed inactive. "
+                      "These relationships remain descriptive "
+                      "until joined to a real availability source."
+                  ),
+
+              "summary": {
+                  "relationships_loaded":
+                      len(relationships),
+
+                  "strong_relationships":
+                      len(strong),
+
+                  "moderate_relationships":
+                      len(moderate),
+
+                  "usable_relationships":
+                      len(usable),
+
+                  "strong_redistribution":
+                      signal_counts.get(
+                          "STRONG_REDISTRIBUTION",
+                          0
+                      ),
+
+                  "possible_redistribution":
+                      signal_counts.get(
+                          "POSSIBLE_REDISTRIBUTION",
+                          0
+                      ),
+
+                  "weak_or_no_signal":
+                      signal_counts.get(
+                          "WEAK_OR_NO_SIGNAL",
+                          0
+                      ),
+
+                  "extreme_change_flags":
+                      len(suspicious),
+
+                  "duplicate_relationships":
+                      duplicates,
+
+                  "teams_represented":
+                      len(team_counts)
+              },
+
+              "top_validated_relationships":
+                  scored[:100],
+
+              "suspicious_relationships":
+                  suspicious[:100]
+          }
+
+
+          with open(
+              "data/jpro-opportunity-validation.json",
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  report,
+                  f,
+                  separators=(",", ":")
+              )
+
+
+          # ==========================================================
+          # FINAL GATE
+          # ==========================================================
+
+          if len(team_counts) < 20:
+              raise RuntimeError(
+                  "Insufficient team coverage."
+              )
+
+
+          if len(strong) < 100:
+              raise RuntimeError(
+                  "Insufficient strong-sample relationships."
+              )
+
+
+          print("")
+          print("=" * 78)
+          print("JPRO OPPORTUNITY VALIDATION PASSED")
+          print("=" * 78)
+
+          print("")
+          print(
+              "IMPORTANT: THIS DOES NOT YET AUTHORIZE "
+              "AUTOMATIC PROJECTION ADJUSTMENTS."
+          )
+
+          print(
+              "NEXT GATE: OFFICIAL/CURRENT AVAILABILITY "
+              "+ REDISTRIBUTION CALIBRATION."
+          )
+
+          PY
