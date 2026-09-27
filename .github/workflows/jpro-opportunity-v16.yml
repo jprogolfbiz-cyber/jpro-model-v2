@@ -1,0 +1,2503 @@
+name: JPro Opportunity Redistribution V1.6
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  opportunity-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get JPro
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Opportunity Engine V1.6
+        run: |
+          python -m pip install --upgrade pip
+          pip install nflreadpy polars pyarrow
+
+      # ============================================================
+      # JPRO OPPORTUNITY REDISTRIBUTION V1.6
+      #
+      # AUDIT MODE ONLY.
+      #
+      # This workflow:
+      #
+      # 1. Reads the VERIFIED V1.5.1 availability gate.
+      # 2. Finds unavailable RB/WR/TE players.
+      # 3. Pulls historical NFL weekly player statistics.
+      # 4. Learns how teammates' opportunities changed in games
+      #    where an important teammate had no recorded participation.
+      # 5. Builds proposed target/carry/air-yard adjustments.
+      # 6. Writes a SEPARATE audit file.
+      #
+      # It DOES NOT modify:
+      #
+      # - existing projections
+      # - existing 20K simulation histograms
+      # - JPro Picks candidates
+      #
+      # Historical absence means NO RECORDED PARTICIPATION in the
+      # weekly player-stat data. It does NOT prove official inactive
+      # status. That limitation is preserved in the output.
+      # ============================================================
+
+      - name: Build Opportunity Redistribution Audit V1.6
+        run: |
+          python <<'PY'
+          import json
+          import math
+          import os
+          from collections import defaultdict
+
+          import nflreadpy as nfl
+
+          PROJECTION_PATH = "data/jpro-current-projections.json"
+          OUTPUT_PATH = "data/jpro-opportunity-redistribution-v16.json"
+
+          CURRENT_SEASON = 2026
+          HISTORICAL_SEASONS = [2022, 2023, 2024, 2025, 2026]
+
+          print("=" * 78)
+          print("JPRO OPPORTUNITY REDISTRIBUTION V1.6")
+          print("AUDIT MODE")
+          print("=" * 78)
+
+          # --------------------------------------------------------
+          # HELPERS
+          # --------------------------------------------------------
+
+          def num(value, default=0.0):
+              try:
+                  value = float(value)
+
+                  if math.isnan(value) or math.isinf(value):
+                      return default
+
+                  return value
+              except Exception:
+                  return default
+
+
+          def clean_text(value):
+              if value is None:
+                  return ""
+
+              return str(value).strip()
+
+
+          def clean_position(value):
+              value = clean_text(value).upper()
+
+              # Some data sources can contain position variants.
+              if value.startswith("WR"):
+                  return "WR"
+
+              if value.startswith("RB"):
+                  return "RB"
+
+              if value.startswith("TE"):
+                  return "TE"
+
+              if value.startswith("QB"):
+                  return "QB"
+
+              return value
+
+
+          def mean(values):
+              values = [
+                  num(v)
+                  for v in values
+                  if v is not None
+              ]
+
+              if not values:
+                  return 0.0
+
+              return sum(values) / len(values)
+
+
+          def weighted_mean(values):
+              total_weight = 0.0
+              total_value = 0.0
+
+              for value, weight in values:
+                  value = num(value)
+                  weight = num(weight)
+
+                  if weight <= 0:
+                      continue
+
+                  total_value += value * weight
+                  total_weight += weight
+
+              if total_weight <= 0:
+                  return 0.0
+
+              return total_value / total_weight
+
+
+          def clamp(value, low, high):
+              return max(low, min(high, value))
+
+
+          def safe_round(value, digits=3):
+              return round(num(value), digits)
+
+
+          # --------------------------------------------------------
+          # LOAD CURRENT JPRO DATA
+          # --------------------------------------------------------
+
+          if not os.path.exists(PROJECTION_PATH):
+              raise RuntimeError(
+                  f"Missing required file: {PROJECTION_PATH}"
+              )
+
+          with open(PROJECTION_PATH, "r", encoding="utf-8") as f:
+              jpro = json.load(f)
+
+          projections = jpro.get("projections", [])
+
+          if not projections:
+              raise RuntimeError(
+                  "No projections found."
+              )
+
+          print("Current projection rows:", len(projections))
+
+          # --------------------------------------------------------
+          # REQUIRE VERIFIED V1.5.1 FOUNDATION
+          # --------------------------------------------------------
+
+          gate = jpro.get("jpro_availability_gate", {})
+
+          if not isinstance(gate, dict):
+              raise RuntimeError(
+                  "Availability gate metadata missing."
+              )
+
+          gate_version = clean_text(
+              gate.get("version")
+          )
+
+          gate_status = clean_text(
+              gate.get("status")
+          ).upper()
+
+          accepted_gate_versions = {
+              "JPRO_AVAILABILITY_GATE_V1.5",
+              "JPRO_AVAILABILITY_GATE_V1.5.1"
+          }
+
+          if gate_version not in accepted_gate_versions:
+              raise RuntimeError(
+                  "V1.6 requires the verified V1.5/V1.5.1 "
+                  f"availability foundation. Found: {gate_version!r}"
+              )
+
+          if gate_status != "ACTIVE":
+              raise RuntimeError(
+                  "Availability gate is not ACTIVE."
+              )
+
+          print("Availability gate:", gate_version)
+          print("Availability status:", gate_status)
+
+          # --------------------------------------------------------
+          # BUILD CURRENT PLAYER MAP
+          # --------------------------------------------------------
+
+          current_players = {}
+
+          for prop in projections:
+              player_id = clean_text(
+                  prop.get("player_id")
+              )
+
+              player_name = clean_text(
+                  prop.get("player")
+              )
+
+              team = clean_text(
+                  prop.get("team")
+              ).upper()
+
+              opponent = clean_text(
+                  prop.get("opponent")
+              ).upper()
+
+              position = clean_position(
+                  prop.get("position")
+              )
+
+              key = player_id or player_name
+
+              if not key:
+                  continue
+
+              availability = prop.get(
+                  "jpro_availability_v15",
+                  {}
+              )
+
+              if not isinstance(availability, dict):
+                  availability = {}
+
+              eligible = (
+                  availability.get("eligible") is True
+              )
+
+              availability_status = clean_text(
+                  availability.get("status")
+              ).upper()
+
+              role = prop.get("role", {})
+
+              if not isinstance(role, dict):
+                  role = {}
+
+              role_score = num(
+                  role.get("role_score"),
+                  50
+              )
+
+              role_label = clean_text(
+                  role.get("role_label")
+              )
+
+              existing = current_players.get(key)
+
+              record = {
+                  "player_id": player_id,
+                  "player": player_name,
+                  "team": team,
+                  "opponent": opponent,
+                  "position": position,
+                  "eligible": eligible,
+                  "availability_status": availability_status,
+                  "role_score": role_score,
+                  "role_label": role_label
+              }
+
+              if existing is None:
+                  current_players[key] = record
+              else:
+                  # Preserve the highest role score observed across props.
+                  if role_score > num(
+                      existing.get("role_score")
+                  ):
+                      existing["role_score"] = role_score
+                      existing["role_label"] = role_label
+
+          if not current_players:
+              raise RuntimeError(
+                  "Could not build current player universe."
+              )
+
+          print(
+              "Current unique projected players:",
+              len(current_players)
+          )
+
+          # --------------------------------------------------------
+          # CURRENT UNAVAILABLE SKILL PLAYERS
+          # --------------------------------------------------------
+
+          blocked_skill_players = []
+
+          for player in current_players.values():
+              if player["position"] not in {
+                  "RB",
+                  "WR",
+                  "TE"
+              }:
+                  continue
+
+              if player["eligible"]:
+                  continue
+
+              blocked_skill_players.append(player)
+
+          blocked_skill_players.sort(
+              key=lambda p: (
+                  p["team"],
+                  p["position"],
+                  p["player"]
+              )
+          )
+
+          print(
+              "Unavailable projected RB/WR/TE:",
+              len(blocked_skill_players)
+          )
+
+          # --------------------------------------------------------
+          # LOAD NFLVERSE WEEKLY PLAYER STATS
+          # --------------------------------------------------------
+
+          print("")
+          print("Loading NFL weekly player stats...")
+
+          raw = nfl.load_player_stats(
+              HISTORICAL_SEASONS
+          )
+
+          # nflreadpy currently returns Polars.
+          # Keep everything in Polars to avoid unnecessary conversion.
+          if hasattr(raw, "collect"):
+              raw = raw.collect()
+
+          columns = set(raw.columns)
+
+          print("Historical rows:", raw.height)
+          print("Historical columns:", len(columns))
+
+          # --------------------------------------------------------
+          # COLUMN DISCOVERY
+          # --------------------------------------------------------
+
+          def choose_column(options, required=False):
+              for option in options:
+                  if option in columns:
+                      return option
+
+              if required:
+                  raise RuntimeError(
+                      "Missing required column. Tried: "
+                      + ", ".join(options)
+                  )
+
+              return None
+
+
+          season_col = choose_column(
+              ["season"],
+              required=True
+          )
+
+          week_col = choose_column(
+              ["week"],
+              required=True
+          )
+
+          player_id_col = choose_column(
+              [
+                  "player_id",
+                  "gsis_id"
+              ],
+              required=True
+          )
+
+          player_name_col = choose_column(
+              [
+                  "player_display_name",
+                  "player_name",
+                  "full_name"
+              ],
+              required=True
+          )
+
+          position_col = choose_column(
+              [
+                  "position",
+                  "position_group"
+              ],
+              required=True
+          )
+
+          team_col = choose_column(
+              [
+                  "recent_team",
+                  "team"
+              ],
+              required=True
+          )
+
+          target_col = choose_column(
+              ["targets"]
+          )
+
+          carry_col = choose_column(
+              [
+                  "carries",
+                  "rushing_attempts"
+              ]
+          )
+
+          reception_col = choose_column(
+              ["receptions"]
+          )
+
+          receiving_air_col = choose_column(
+              [
+                  "receiving_air_yards",
+                  "air_yards"
+              ]
+          )
+
+          receiving_yards_col = choose_column(
+              ["receiving_yards"]
+          )
+
+          rushing_yards_col = choose_column(
+              ["rushing_yards"]
+          )
+
+          target_share_col = choose_column(
+              ["target_share"]
+          )
+
+          air_share_col = choose_column(
+              [
+                  "air_yards_share",
+                  "air_yard_share"
+              ]
+          )
+
+          print("")
+          print("Detected schema:")
+          print(" Season:", season_col)
+          print(" Week:", week_col)
+          print(" Player ID:", player_id_col)
+          print(" Player:", player_name_col)
+          print(" Position:", position_col)
+          print(" Team:", team_col)
+          print(" Targets:", target_col)
+          print(" Carries:", carry_col)
+          print(" Receptions:", reception_col)
+          print(" Air yards:", receiving_air_col)
+          print(" Receiving yards:", receiving_yards_col)
+          print(" Rushing yards:", rushing_yards_col)
+          print(" Target share:", target_share_col)
+          print(" Air share:", air_share_col)
+
+          if target_col is None and carry_col is None:
+              raise RuntimeError(
+                  "Neither targets nor carries are available."
+              )
+
+          # --------------------------------------------------------
+          # CONVERT REQUIRED ROWS TO PYTHON RECORDS
+          #
+          # The dataset is manageable at this stage and using
+          # dictionaries makes teammate-with/without analysis easier.
+          # --------------------------------------------------------
+
+          selected_columns = [
+              season_col,
+              week_col,
+              player_id_col,
+              player_name_col,
+              position_col,
+              team_col
+          ]
+
+          optional_columns = [
+              target_col,
+              carry_col,
+              reception_col,
+              receiving_air_col,
+              receiving_yards_col,
+              rushing_yards_col,
+              target_share_col,
+              air_share_col
+          ]
+
+          for col in optional_columns:
+              if col and col not in selected_columns:
+                  selected_columns.append(col)
+
+          raw = raw.select(selected_columns)
+
+          records = raw.to_dicts()
+
+          weekly = []
+
+          for row in records:
+              season = int(
+                  num(row.get(season_col))
+              )
+
+              week = int(
+                  num(row.get(week_col))
+              )
+
+              team = clean_text(
+                  row.get(team_col)
+              ).upper()
+
+              position = clean_position(
+                  row.get(position_col)
+              )
+
+              player_id = clean_text(
+                  row.get(player_id_col)
+              )
+
+              player_name = clean_text(
+                  row.get(player_name_col)
+              )
+
+              if not season or not week:
+                  continue
+
+              if not team:
+                  continue
+
+              if position not in {
+                  "QB",
+                  "RB",
+                  "WR",
+                  "TE"
+              }:
+                  continue
+
+              if not player_id and not player_name:
+                  continue
+
+              weekly.append({
+                  "season": season,
+                  "week": week,
+                  "team": team,
+                  "player_id": player_id,
+                  "player": player_name,
+                  "position": position,
+
+                  "targets": num(
+                      row.get(target_col)
+                  ) if target_col else 0.0,
+
+                  "carries": num(
+                      row.get(carry_col)
+                  ) if carry_col else 0.0,
+
+                  "receptions": num(
+                      row.get(reception_col)
+                  ) if reception_col else 0.0,
+
+                  "receiving_air_yards": num(
+                      row.get(receiving_air_col)
+                  ) if receiving_air_col else 0.0,
+
+                  "receiving_yards": num(
+                      row.get(receiving_yards_col)
+                  ) if receiving_yards_col else 0.0,
+
+                  "rushing_yards": num(
+                      row.get(rushing_yards_col)
+                  ) if rushing_yards_col else 0.0,
+
+                  "target_share": num(
+                      row.get(target_share_col)
+                  ) if target_share_col else 0.0,
+
+                  "air_yards_share": num(
+                      row.get(air_share_col)
+                  ) if air_share_col else 0.0
+              })
+
+          if not weekly:
+              raise RuntimeError(
+                  "No usable weekly skill-player records."
+              )
+
+          print("")
+          print("Usable weekly skill rows:", len(weekly))
+
+          # --------------------------------------------------------
+          # TEAM-GAME INDEX
+          # --------------------------------------------------------
+
+          team_games = defaultdict(list)
+          player_rows = defaultdict(list)
+
+          for row in weekly:
+              game_key = (
+                  row["season"],
+                  row["week"],
+                  row["team"]
+              )
+
+              team_games[game_key].append(row)
+
+              player_key = (
+                  row["season"],
+                  row["team"],
+                  row["player_id"]
+                  or row["player"]
+              )
+
+              player_rows[player_key].append(row)
+
+          print("Team-game records:", len(team_games))
+
+          # --------------------------------------------------------
+          # HISTORICAL PLAYER PROFILES
+          #
+          # Used to determine which teammates were meaningful enough
+          # for an absence split to be useful.
+          # --------------------------------------------------------
+
+          profiles = {}
+
+          for key, rows in player_rows.items():
+              season, team, player_key = key
+
+              games = len(rows)
+
+              if games <= 0:
+                  continue
+
+              latest = rows[-1]
+
+              avg_targets = mean(
+                  [r["targets"] for r in rows]
+              )
+
+              avg_carries = mean(
+                  [r["carries"] for r in rows]
+              )
+
+              avg_air_yards = mean(
+                  [
+                      r["receiving_air_yards"]
+                      for r in rows
+                  ]
+              )
+
+              avg_opportunities = (
+                  avg_targets + avg_carries
+              )
+
+              profiles[key] = {
+                  "season": season,
+                  "team": team,
+                  "player_key": player_key,
+                  "player_id": latest["player_id"],
+                  "player": latest["player"],
+                  "position": latest["position"],
+                  "games": games,
+                  "avg_targets": avg_targets,
+                  "avg_carries": avg_carries,
+                  "avg_air_yards": avg_air_yards,
+                  "avg_opportunities": avg_opportunities
+              }
+
+          print("Historical player-team profiles:", len(profiles))
+
+          # --------------------------------------------------------
+          # IDENTIFY MEANINGFUL TRIGGER PLAYERS
+          #
+          # Trigger = player whose missing participation could
+          # reasonably create opportunity for teammates.
+          #
+          # These thresholds are HEURISTICS, not calibrated
+          # probabilities.
+          # --------------------------------------------------------
+
+          trigger_profiles = []
+
+          for profile in profiles.values():
+              if profile["games"] < 4:
+                  continue
+
+              position = profile["position"]
+
+              meaningful = False
+
+              if position in {"WR", "TE"}:
+                  meaningful = (
+                      profile["avg_targets"] >= 4.0
+                  )
+
+              elif position == "RB":
+                  meaningful = (
+                      profile["avg_opportunities"] >= 8.0
+                  )
+
+              if meaningful:
+                  trigger_profiles.append(profile)
+
+          print(
+              "Meaningful historical trigger profiles:",
+              len(trigger_profiles)
+          )
+
+          # --------------------------------------------------------
+          # BUILD HISTORICAL WITH/WITHOUT SPLITS
+          #
+          # For each trigger:
+          #
+          # WITH:
+          # team games where trigger has a weekly player-stat row.
+          #
+          # WITHOUT:
+          # team games in same season/team where trigger has no
+          # weekly player-stat row.
+          #
+          # Again: WITHOUT means NO RECORDED PARTICIPATION,
+          # not verified official inactive.
+          # --------------------------------------------------------
+
+          relationships = []
+
+          for trigger in trigger_profiles:
+              season = trigger["season"]
+              team = trigger["team"]
+              trigger_key = trigger["player_key"]
+
+              season_team_games = sorted(
+                  [
+                      key
+                      for key in team_games.keys()
+                      if key[0] == season
+                      and key[2] == team
+                  ],
+                  key=lambda x: x[1]
+              )
+
+              if len(season_team_games) < 5:
+                  continue
+
+              trigger_present_games = set()
+
+              for row in player_rows.get(
+                  (
+                      season,
+                      team,
+                      trigger_key
+                  ),
+                  []
+              ):
+                  trigger_present_games.add(
+                      (
+                          row["season"],
+                          row["week"],
+                          row["team"]
+                      )
+                  )
+
+              with_games = [
+                  game
+                  for game in season_team_games
+                  if game in trigger_present_games
+              ]
+
+              without_games = [
+                  game
+                  for game in season_team_games
+                  if game not in trigger_present_games
+              ]
+
+              if len(with_games) < 3:
+                  continue
+
+              if len(without_games) < 1:
+                  continue
+
+              # All teammates appearing for this team-season.
+              teammate_keys = set()
+
+              for game in season_team_games:
+                  for row in team_games[game]:
+                      teammate_key = (
+                          row["player_id"]
+                          or row["player"]
+                      )
+
+                      if teammate_key == trigger_key:
+                          continue
+
+                      if row["position"] not in {
+                          "RB",
+                          "WR",
+                          "TE"
+                      }:
+                          continue
+
+                      teammate_keys.add(teammate_key)
+
+              for teammate_key in teammate_keys:
+                  teammate_profile = profiles.get(
+                      (
+                          season,
+                          team,
+                          teammate_key
+                      )
+                  )
+
+                  if not teammate_profile:
+                      continue
+
+                  teammate_rows_by_game = {}
+
+                  for row in player_rows.get(
+                      (
+                          season,
+                          team,
+                          teammate_key
+                      ),
+                      []
+                  ):
+                      game_key = (
+                          row["season"],
+                          row["week"],
+                          row["team"]
+                      )
+
+                      teammate_rows_by_game[
+                          game_key
+                      ] = row
+
+                  with_rows = [
+                      teammate_rows_by_game[g]
+                      for g in with_games
+                      if g in teammate_rows_by_game
+                  ]
+
+                  without_rows = [
+                      teammate_rows_by_game[g]
+                      for g in without_games
+                      if g in teammate_rows_by_game
+                  ]
+
+                  with_n = len(with_rows)
+                  without_n = len(without_rows)
+
+                  if with_n < 3:
+                      continue
+
+                  if without_n < 1:
+                      continue
+
+                  with_targets = mean(
+                      [r["targets"] for r in with_rows]
+                  )
+
+                  without_targets = mean(
+                      [r["targets"] for r in without_rows]
+                  )
+
+                  with_carries = mean(
+                      [r["carries"] for r in with_rows]
+                  )
+
+                  without_carries = mean(
+                      [r["carries"] for r in without_rows]
+                  )
+
+                  with_air = mean(
+                      [
+                          r["receiving_air_yards"]
+                          for r in with_rows
+                      ]
+                  )
+
+                  without_air = mean(
+                      [
+                          r["receiving_air_yards"]
+                          for r in without_rows
+                      ]
+                  )
+
+                  with_rec_yards = mean(
+                      [
+                          r["receiving_yards"]
+                          for r in with_rows
+                      ]
+                  )
+
+                  without_rec_yards = mean(
+                      [
+                          r["receiving_yards"]
+                          for r in without_rows
+                      ]
+                  )
+
+                  with_rush_yards = mean(
+                      [
+                          r["rushing_yards"]
+                          for r in with_rows
+                      ]
+                  )
+
+                  without_rush_yards = mean(
+                      [
+                          r["rushing_yards"]
+                          for r in without_rows
+                      ]
+                  )
+
+                  with_receptions = mean(
+                      [
+                          r["receptions"]
+                          for r in with_rows
+                      ]
+                  )
+
+                  without_receptions = mean(
+                      [
+                          r["receptions"]
+                          for r in without_rows
+                      ]
+                  )
+
+                  target_delta = (
+                      without_targets - with_targets
+                  )
+
+                  carry_delta = (
+                      without_carries - with_carries
+                  )
+
+                  air_delta = (
+                      without_air - with_air
+                  )
+
+                  reception_delta = (
+                      without_receptions
+                      - with_receptions
+                  )
+
+                  receiving_yards_delta = (
+                      without_rec_yards
+                      - with_rec_yards
+                  )
+
+                  rushing_yards_delta = (
+                      without_rush_yards
+                      - with_rush_yards
+                  )
+
+                  if (
+                      without_n >= 6
+                      and with_n >= 6
+                  ):
+                      evidence = "STRONG_SAMPLE"
+                      confidence_weight = 1.00
+
+                  elif (
+                      without_n >= 3
+                      and with_n >= 4
+                  ):
+                      evidence = "MODERATE_SAMPLE"
+                      confidence_weight = 0.70
+
+                  else:
+                      evidence = "LIMITED_SAMPLE"
+                      confidence_weight = 0.35
+
+                  # Ranking signal only.
+                  # This is NOT a probability.
+                  opportunity_signal = (
+                      max(target_delta, 0) * 10
+                      + max(carry_delta, 0) * 5
+                      + max(air_delta, 0) * 0.08
+                  )
+
+                  opportunity_signal *= confidence_weight
+
+                  relationships.append({
+                      "season": season,
+                      "team": team,
+
+                      "trigger_player_id":
+                          trigger["player_id"],
+
+                      "trigger_player":
+                          trigger["player"],
+
+                      "trigger_position":
+                          trigger["position"],
+
+                      "trigger_avg_targets":
+                          safe_round(
+                              trigger["avg_targets"]
+                          ),
+
+                      "trigger_avg_carries":
+                          safe_round(
+                              trigger["avg_carries"]
+                          ),
+
+                      "trigger_avg_opportunities":
+                          safe_round(
+                              trigger[
+                                  "avg_opportunities"
+                              ]
+                          ),
+
+                      "teammate_player_id":
+                          teammate_profile[
+                              "player_id"
+                          ],
+
+                      "teammate_player":
+                          teammate_profile[
+                              "player"
+                          ],
+
+                      "teammate_position":
+                          teammate_profile[
+                              "position"
+                          ],
+
+                      "with_trigger_games":
+                          with_n,
+
+                      "without_trigger_games":
+                          without_n,
+
+                      "evidence":
+                          evidence,
+
+                      "confidence_weight":
+                          confidence_weight,
+
+                      "targets_with":
+                          safe_round(
+                              with_targets
+                          ),
+
+                      "targets_without":
+                          safe_round(
+                              without_targets
+                          ),
+
+                      "target_delta":
+                          safe_round(
+                              target_delta
+                          ),
+
+                      "carries_with":
+                          safe_round(
+                              with_carries
+                          ),
+
+                      "carries_without":
+                          safe_round(
+                              without_carries
+                          ),
+
+                      "carry_delta":
+                          safe_round(
+                              carry_delta
+                          ),
+
+                      "air_yards_with":
+                          safe_round(
+                              with_air
+                          ),
+
+                      "air_yards_without":
+                          safe_round(
+                              without_air
+                          ),
+
+                      "air_yards_delta":
+                          safe_round(
+                              air_delta
+                          ),
+
+                      "receptions_delta":
+                          safe_round(
+                              reception_delta
+                          ),
+
+                      "receiving_yards_delta":
+                          safe_round(
+                              receiving_yards_delta
+                          ),
+
+                      "rushing_yards_delta":
+                          safe_round(
+                              rushing_yards_delta
+                          ),
+
+                      "opportunity_signal":
+                          safe_round(
+                              opportunity_signal
+                          ),
+
+                      "absence_definition":
+                          "NO_RECORDED_PARTICIPATION"
+                  })
+
+          relationships.sort(
+              key=lambda r: (
+                  r["opportunity_signal"],
+                  r["without_trigger_games"],
+                  r["with_trigger_games"]
+              ),
+              reverse=True
+          )
+
+          print("")
+          print(
+              "Historical teammate relationships:",
+              len(relationships)
+          )
+
+          # --------------------------------------------------------
+          # CURRENT PROJECTION LOOKUP
+          # --------------------------------------------------------
+
+          props_by_player = defaultdict(list)
+
+          for prop in projections:
+              player_key = clean_text(
+                  prop.get("player_id")
+              ) or clean_text(
+                  prop.get("player")
+              )
+
+              if player_key:
+                  props_by_player[
+                      player_key
+                  ].append(prop)
+
+          # --------------------------------------------------------
+          # CURRENT ELIGIBLE TEAMMATES
+          # --------------------------------------------------------
+
+          current_team_players = defaultdict(list)
+
+          for player in current_players.values():
+              current_team_players[
+                  player["team"]
+              ].append(player)
+
+          # --------------------------------------------------------
+          # MATCH CURRENT ABSENCES TO HISTORICAL SPLITS
+          #
+          # We match primarily by player ID.
+          #
+          # If exact current-team historical relationships do not
+          # exist, V1.6 does NOT invent them.
+          # --------------------------------------------------------
+
+          proposed_adjustments = []
+
+          current_absence_audit = []
+
+          relationships_by_trigger = defaultdict(list)
+
+          for rel in relationships:
+              trigger_id = clean_text(
+                  rel.get("trigger_player_id")
+              )
+
+              trigger_name = clean_text(
+                  rel.get("trigger_player")
+              )
+
+              if trigger_id:
+                  relationships_by_trigger[
+                      ("ID", trigger_id)
+                  ].append(rel)
+
+              if trigger_name:
+                  relationships_by_trigger[
+                      ("NAME", trigger_name.lower())
+                  ].append(rel)
+
+          for absent in blocked_skill_players:
+              absent_id = clean_text(
+                  absent.get("player_id")
+              )
+
+              absent_name = clean_text(
+                  absent.get("player")
+              )
+
+              team = absent["team"]
+
+              matches = []
+
+              if absent_id:
+                  matches.extend(
+                      relationships_by_trigger.get(
+                          ("ID", absent_id),
+                          []
+                      )
+                  )
+
+              if not matches and absent_name:
+                  matches.extend(
+                      relationships_by_trigger.get(
+                          (
+                              "NAME",
+                              absent_name.lower()
+                          ),
+                          []
+                      )
+                  )
+
+              # Only use historical relationships from the
+              # player's CURRENT team.
+              matches = [
+                  rel
+                  for rel in matches
+                  if clean_text(
+                      rel.get("team")
+                  ).upper() == team
+              ]
+
+              # Current eligible teammates.
+              eligible_teammates = {
+                  (
+                      clean_text(p.get("player_id"))
+                      or clean_text(p.get("player"))
+                  ): p
+                  for p in current_team_players.get(
+                      team,
+                      []
+                  )
+                  if p.get("eligible") is True
+                  and p.get("position")
+                  in {"RB", "WR", "TE"}
+              }
+
+              matched_adjustments = []
+
+              for rel in matches:
+                  teammate_id = clean_text(
+                      rel.get(
+                          "teammate_player_id"
+                      )
+                  )
+
+                  teammate_name = clean_text(
+                      rel.get(
+                          "teammate_player"
+                      )
+                  )
+
+                  teammate_key = (
+                      teammate_id
+                      or teammate_name
+                  )
+
+                  current_teammate = (
+                      eligible_teammates.get(
+                          teammate_key
+                      )
+                  )
+
+                  # Player IDs can occasionally be unavailable
+                  # or differ, so use exact normalized name only
+                  # as a secondary current-roster lookup.
+                  if current_teammate is None:
+                      for candidate in (
+                          eligible_teammates.values()
+                      ):
+                          if (
+                              clean_text(
+                                  candidate.get(
+                                      "player"
+                                  )
+                              ).lower()
+                              == teammate_name.lower()
+                          ):
+                              current_teammate = candidate
+                              break
+
+                  if current_teammate is None:
+                      continue
+
+                  confidence_weight = num(
+                      rel.get(
+                          "confidence_weight"
+                      ),
+                      0
+                  )
+
+                  raw_target_delta = num(
+                      rel.get("target_delta")
+                  )
+
+                  raw_carry_delta = num(
+                      rel.get("carry_delta")
+                  )
+
+                  raw_air_delta = num(
+                      rel.get("air_yards_delta")
+                  )
+
+                  # AUDIT adjustments are shrunk toward zero.
+                  #
+                  # Limited historical samples therefore cannot
+                  # create full-strength adjustments.
+                  adjusted_target_delta = (
+                      raw_target_delta
+                      * confidence_weight
+                  )
+
+                  adjusted_carry_delta = (
+                      raw_carry_delta
+                      * confidence_weight
+                  )
+
+                  adjusted_air_delta = (
+                      raw_air_delta
+                      * confidence_weight
+                  )
+
+                  # V1.6 only proposes POSITIVE opportunity
+                  # redistribution for current beneficiaries.
+                  #
+                  # Negative historical splits remain available
+                  # in the relationship evidence but are not used
+                  # to create a beneficiary boost.
+                  proposed_target_delta = max(
+                      adjusted_target_delta,
+                      0
+                  )
+
+                  proposed_carry_delta = max(
+                      adjusted_carry_delta,
+                      0
+                  )
+
+                  proposed_air_delta = max(
+                      adjusted_air_delta,
+                      0
+                  )
+
+                  # Require at least one useful positive signal.
+                  if (
+                      proposed_target_delta <= 0
+                      and proposed_carry_delta <= 0
+                      and proposed_air_delta <= 0
+                  ):
+                      continue
+
+                  opportunity_signal = (
+                      proposed_target_delta * 10
+                      + proposed_carry_delta * 5
+                      + proposed_air_delta * 0.08
+                  )
+
+                  adjustment = {
+                      "team": team,
+
+                      "absent_player_id":
+                          absent_id,
+
+                      "absent_player":
+                          absent_name,
+
+                      "absent_position":
+                          absent["position"],
+
+                      "absence_status":
+                          absent[
+                              "availability_status"
+                          ],
+
+                      "beneficiary_player_id":
+                          current_teammate[
+                              "player_id"
+                          ],
+
+                      "beneficiary_player":
+                          current_teammate[
+                              "player"
+                          ],
+
+                      "beneficiary_position":
+                          current_teammate[
+                              "position"
+                          ],
+
+                      "beneficiary_role_score":
+                          safe_round(
+                              current_teammate[
+                                  "role_score"
+                              ],
+                              2
+                          ),
+
+                      "beneficiary_role_label":
+                          current_teammate[
+                              "role_label"
+                          ],
+
+                      "historical_season":
+                          rel["season"],
+
+                      "with_trigger_games":
+                          rel[
+                              "with_trigger_games"
+                          ],
+
+                      "without_trigger_games":
+                          rel[
+                              "without_trigger_games"
+                          ],
+
+                      "evidence":
+                          rel["evidence"],
+
+                      "confidence_weight":
+                          confidence_weight,
+
+                      "historical_target_delta":
+                          rel["target_delta"],
+
+                      "historical_carry_delta":
+                          rel["carry_delta"],
+
+                      "historical_air_yards_delta":
+                          rel[
+                              "air_yards_delta"
+                          ],
+
+                      "proposed_target_delta":
+                          safe_round(
+                              proposed_target_delta
+                          ),
+
+                      "proposed_carry_delta":
+                          safe_round(
+                              proposed_carry_delta
+                          ),
+
+                      "proposed_air_yards_delta":
+                          safe_round(
+                              proposed_air_delta
+                          ),
+
+                      "opportunity_signal":
+                          safe_round(
+                              opportunity_signal
+                          ),
+
+                      "status":
+                          "AUDIT_ONLY_NOT_APPLIED",
+
+                      "source_method":
+                          "HISTORICAL_TEAMMATE_WITHOUT_SPLIT"
+                  }
+
+                  proposed_adjustments.append(
+                      adjustment
+                  )
+
+                  matched_adjustments.append(
+                      adjustment
+                  )
+
+              current_absence_audit.append({
+                  "team": team,
+                  "player_id": absent_id,
+                  "player": absent_name,
+                  "position": absent["position"],
+                  "availability_status":
+                      absent["availability_status"],
+
+                  "historical_relationships_found":
+                      len(matches),
+
+                  "current_beneficiary_adjustments":
+                      len(matched_adjustments),
+
+                  "status":
+                      (
+                          "HISTORICAL_EVIDENCE_FOUND"
+                          if matched_adjustments
+                          else "NO_USABLE_HISTORICAL_SPLIT"
+                      )
+              })
+
+          # --------------------------------------------------------
+          # SORT PROPOSED ADJUSTMENTS
+          # --------------------------------------------------------
+
+          proposed_adjustments.sort(
+              key=lambda a: (
+                  a["opportunity_signal"],
+                  a["beneficiary_role_score"]
+              ),
+              reverse=True
+          )
+
+          # --------------------------------------------------------
+          # AGGREGATE BENEFICIARY EFFECTS
+          #
+          # A player can benefit from more than one current absence.
+          # We aggregate for inspection only.
+          # --------------------------------------------------------
+
+          aggregate_map = {}
+
+          for adjustment in proposed_adjustments:
+              key = (
+                  adjustment[
+                      "beneficiary_player_id"
+                  ]
+                  or adjustment[
+                      "beneficiary_player"
+                  ]
+              )
+
+              if key not in aggregate_map:
+                  aggregate_map[key] = {
+                      "team":
+                          adjustment["team"],
+
+                      "player_id":
+                          adjustment[
+                              "beneficiary_player_id"
+                          ],
+
+                      "player":
+                          adjustment[
+                              "beneficiary_player"
+                          ],
+
+                      "position":
+                          adjustment[
+                              "beneficiary_position"
+                          ],
+
+                      "role_score":
+                          adjustment[
+                              "beneficiary_role_score"
+                          ],
+
+                      "role_label":
+                          adjustment[
+                              "beneficiary_role_label"
+                          ],
+
+                      "source_absences": [],
+
+                      "proposed_target_delta":
+                          0.0,
+
+                      "proposed_carry_delta":
+                          0.0,
+
+                      "proposed_air_yards_delta":
+                          0.0,
+
+                      "opportunity_signal":
+                          0.0,
+
+                      "status":
+                          "AUDIT_ONLY_NOT_APPLIED"
+                  }
+
+              aggregate = aggregate_map[key]
+
+              aggregate[
+                  "source_absences"
+              ].append({
+                  "player_id":
+                      adjustment[
+                          "absent_player_id"
+                      ],
+
+                  "player":
+                      adjustment[
+                          "absent_player"
+                      ],
+
+                  "position":
+                      adjustment[
+                          "absent_position"
+                      ],
+
+                  "availability_status":
+                      adjustment[
+                          "absence_status"
+                      ],
+
+                  "evidence":
+                      adjustment[
+                          "evidence"
+                      ],
+
+                  "historical_season":
+                      adjustment[
+                          "historical_season"
+                      ]
+              })
+
+              aggregate[
+                  "proposed_target_delta"
+              ] += num(
+                  adjustment[
+                      "proposed_target_delta"
+                  ]
+              )
+
+              aggregate[
+                  "proposed_carry_delta"
+              ] += num(
+                  adjustment[
+                      "proposed_carry_delta"
+                  ]
+              )
+
+              aggregate[
+                  "proposed_air_yards_delta"
+              ] += num(
+                  adjustment[
+                      "proposed_air_yards_delta"
+                  ]
+              )
+
+              aggregate[
+                  "opportunity_signal"
+              ] += num(
+                  adjustment[
+                      "opportunity_signal"
+                  ]
+              )
+
+          aggregate_adjustments = []
+
+          for aggregate in aggregate_map.values():
+              aggregate[
+                  "proposed_target_delta"
+              ] = safe_round(
+                  aggregate[
+                      "proposed_target_delta"
+                  ]
+              )
+
+              aggregate[
+                  "proposed_carry_delta"
+              ] = safe_round(
+                  aggregate[
+                      "proposed_carry_delta"
+                  ]
+              )
+
+              aggregate[
+                  "proposed_air_yards_delta"
+              ] = safe_round(
+                  aggregate[
+                      "proposed_air_yards_delta"
+                  ]
+              )
+
+              aggregate[
+                  "opportunity_signal"
+              ] = safe_round(
+                  aggregate[
+                      "opportunity_signal"
+                  ]
+              )
+
+              aggregate_adjustments.append(
+                  aggregate
+              )
+
+          aggregate_adjustments.sort(
+              key=lambda a: (
+                  a["opportunity_signal"],
+                  a["role_score"]
+              ),
+              reverse=True
+          )
+
+          # --------------------------------------------------------
+          # EVIDENCE COUNTS
+          # --------------------------------------------------------
+
+          evidence_counts = defaultdict(int)
+
+          for rel in relationships:
+              evidence_counts[
+                  rel["evidence"]
+              ] += 1
+
+          adjustment_evidence_counts = defaultdict(
+              int
+          )
+
+          for adjustment in proposed_adjustments:
+              adjustment_evidence_counts[
+                  adjustment["evidence"]
+              ] += 1
+
+          # --------------------------------------------------------
+          # OUTPUT DOCUMENT
+          # --------------------------------------------------------
+
+          output = {
+              "version":
+                  "JPRO_OPPORTUNITY_REDISTRIBUTION_V1.6",
+
+              "status":
+                  "AUDIT_READY",
+
+              "mode":
+                  "AUDIT_ONLY",
+
+              "current_season":
+                  CURRENT_SEASON,
+
+              "historical_seasons":
+                  HISTORICAL_SEASONS,
+
+              "availability_foundation":
+                  gate_version,
+
+              "method":
+                  "NFLVERSE_TEAMMATE_WITHOUT_PARTICIPATION_SPLITS",
+
+              "absence_definition":
+                  "NO_RECORDED_PARTICIPATION",
+
+              "live_projection_adjustments_enabled":
+                  False,
+
+              "live_simulation_adjustments_enabled":
+                  False,
+
+              "jpro_picks_modified":
+                  False,
+
+              "summary": {
+                  "current_projection_rows":
+                      len(projections),
+
+                  "current_projected_players":
+                      len(current_players),
+
+                  "current_unavailable_skill_players":
+                      len(
+                          blocked_skill_players
+                      ),
+
+                  "historical_weekly_rows":
+                      len(weekly),
+
+                  "historical_player_profiles":
+                      len(profiles),
+
+                  "meaningful_trigger_profiles":
+                      len(trigger_profiles),
+
+                  "historical_relationships":
+                      len(relationships),
+
+                  "proposed_adjustment_rows":
+                      len(
+                          proposed_adjustments
+                      ),
+
+                  "unique_current_beneficiaries":
+                      len(
+                          aggregate_adjustments
+                      )
+              },
+
+              "historical_evidence_counts":
+                  dict(evidence_counts),
+
+              "current_adjustment_evidence_counts":
+                  dict(
+                      adjustment_evidence_counts
+                  ),
+
+              "current_absences":
+                  current_absence_audit,
+
+              "proposed_adjustments":
+                  proposed_adjustments,
+
+              "aggregate_beneficiary_adjustments":
+                  aggregate_adjustments,
+
+              # Keep top historical relationships for audit.
+              # We do not need to commit every relationship to
+              # understand whether the engine is behaving correctly.
+              "top_historical_relationships":
+                  relationships[:500],
+
+              "limitations": [
+                  (
+                      "Historical absence is defined as no recorded "
+                      "weekly player-stat participation and is not "
+                      "proof of official inactive status."
+                  ),
+                  (
+                      "Historical teammate splits are descriptive "
+                      "associations and should not be interpreted "
+                      "as causal effects."
+                  ),
+                  (
+                      "Role changes, trades, depth-chart changes, "
+                      "injuries and game context can confound "
+                      "with/without splits."
+                  ),
+                  (
+                      "Limited samples are heavily shrunk toward "
+                      "zero before a proposed adjustment is created."
+                  ),
+                  (
+                      "V1.6 does not modify live projections, "
+                      "simulation histograms or JPro Picks."
+                  ),
+                  (
+                      "A later validated activation stage must "
+                      "recompute affected projections and 20K "
+                      "distributions rather than simply transferring "
+                      "an absent player's projected yards."
+                  )
+              ]
+          }
+
+          os.makedirs(
+              os.path.dirname(OUTPUT_PATH),
+              exist_ok=True
+          )
+
+          with open(
+              OUTPUT_PATH,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  output,
+                  f,
+                  separators=(",", ":")
+              )
+
+          # --------------------------------------------------------
+          # CONSOLE PREVIEW
+          # --------------------------------------------------------
+
+          print("")
+          print("=" * 78)
+          print("CURRENT ABSENCE AUDIT")
+          print("=" * 78)
+
+          for item in current_absence_audit:
+              print("")
+              print(
+                  item["player"],
+                  "|",
+                  item["team"],
+                  "|",
+                  item["position"]
+              )
+
+              print(
+                  "  STATUS:",
+                  item[
+                      "availability_status"
+                  ]
+              )
+
+              print(
+                  "  HISTORICAL RELATIONSHIPS:",
+                  item[
+                      "historical_relationships_found"
+                  ]
+              )
+
+              print(
+                  "  CURRENT BENEFICIARIES:",
+                  item[
+                      "current_beneficiary_adjustments"
+                  ]
+              )
+
+              print(
+                  "  RESULT:",
+                  item["status"]
+              )
+
+          print("")
+          print("=" * 78)
+          print("TOP PROPOSED REDISTRIBUTION BENEFICIARIES")
+          print("=" * 78)
+
+          for i, item in enumerate(
+              aggregate_adjustments[:30],
+              start=1
+          ):
+              print("")
+              print(
+                  f"#{i}",
+                  item["player"],
+                  "|",
+                  item["team"],
+                  "|",
+                  item["position"]
+              )
+
+              print(
+                  "  ROLE:",
+                  item["role_label"],
+                  item["role_score"]
+              )
+
+              print(
+                  "  TARGET DELTA:",
+                  item[
+                      "proposed_target_delta"
+                  ]
+              )
+
+              print(
+                  "  CARRY DELTA:",
+                  item[
+                      "proposed_carry_delta"
+                  ]
+              )
+
+              print(
+                  "  AIR-YARD DELTA:",
+                  item[
+                      "proposed_air_yards_delta"
+                  ]
+              )
+
+              print(
+                  "  SIGNAL:",
+                  item[
+                      "opportunity_signal"
+                  ]
+              )
+
+              source_names = [
+                  source["player"]
+                  for source
+                  in item[
+                      "source_absences"
+                  ]
+              ]
+
+              print(
+                  "  ABSENCE SOURCE:",
+                  ", ".join(source_names)
+              )
+
+          print("")
+          print("=" * 78)
+          print("V1.6 AUDIT COMPLETE")
+          print("=" * 78)
+
+          print(
+              "Unavailable skill players:",
+              len(blocked_skill_players)
+          )
+
+          print(
+              "Historical relationships:",
+              len(relationships)
+          )
+
+          print(
+              "Proposed adjustment rows:",
+              len(proposed_adjustments)
+          )
+
+          print(
+              "Unique beneficiaries:",
+              len(aggregate_adjustments)
+          )
+
+          print("")
+          print(
+              "LIVE PROJECTIONS MODIFIED: NO"
+          )
+
+          print(
+              "20K DISTRIBUTIONS MODIFIED: NO"
+          )
+
+          print(
+              "JPRO PICKS MODIFIED: NO"
+          )
+
+          print("")
+          print("Saved:", OUTPUT_PATH)
+
+          PY
+
+      # ============================================================
+      # VERIFY V1.6
+      # ============================================================
+
+      - name: Verify Opportunity Redistribution V1.6
+        run: |
+          python <<'PY'
+          import json
+          import os
+
+          PROJECTION_PATH = "data/jpro-current-projections.json"
+          AUDIT_PATH = "data/jpro-opportunity-redistribution-v16.json"
+
+          EXPECTED_SIMS = 20000
+
+          print("=" * 78)
+          print("VERIFY JPRO OPPORTUNITY REDISTRIBUTION V1.6")
+          print("=" * 78)
+
+          if not os.path.exists(PROJECTION_PATH):
+              raise RuntimeError(
+                  "Current projections file missing."
+              )
+
+          if not os.path.exists(AUDIT_PATH):
+              raise RuntimeError(
+                  "V1.6 audit file missing."
+              )
+
+          with open(
+              PROJECTION_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              jpro = json.load(f)
+
+          with open(
+              AUDIT_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              audit = json.load(f)
+
+          # --------------------------------------------------------
+          # VERSION
+          # --------------------------------------------------------
+
+          if (
+              audit.get("version")
+              != "JPRO_OPPORTUNITY_REDISTRIBUTION_V1.6"
+          ):
+              raise RuntimeError(
+                  "Wrong V1.6 audit version."
+              )
+
+          if (
+              audit.get("status")
+              != "AUDIT_READY"
+          ):
+              raise RuntimeError(
+                  "V1.6 audit is not ready."
+              )
+
+          if (
+              audit.get("mode")
+              != "AUDIT_ONLY"
+          ):
+              raise RuntimeError(
+                  "V1.6 unexpectedly left audit mode."
+              )
+
+          # --------------------------------------------------------
+          # ENSURE LIVE MODIFICATION IS DISABLED
+          # --------------------------------------------------------
+
+          if audit.get(
+              "live_projection_adjustments_enabled"
+          ):
+              raise RuntimeError(
+                  "Live projection adjustments unexpectedly enabled."
+              )
+
+          if audit.get(
+              "live_simulation_adjustments_enabled"
+          ):
+              raise RuntimeError(
+                  "Live simulation adjustments unexpectedly enabled."
+              )
+
+          if audit.get(
+              "jpro_picks_modified"
+          ):
+              raise RuntimeError(
+                  "JPro Picks unexpectedly modified."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY CURRENT FOUNDATION
+          # --------------------------------------------------------
+
+          projections = jpro.get(
+              "projections",
+              []
+          )
+
+          if not projections:
+              raise RuntimeError(
+                  "No current projections."
+              )
+
+          if len(projections) != 939:
+              print(
+                  "NOTICE: Current projection count is",
+                  len(projections),
+                  "instead of previous baseline 939."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY AVAILABILITY GATE STILL EXISTS
+          # --------------------------------------------------------
+
+          gate = jpro.get(
+              "jpro_availability_gate",
+              {}
+          )
+
+          if (
+              not isinstance(gate, dict)
+              or gate.get("status") != "ACTIVE"
+          ):
+              raise RuntimeError(
+                  "Availability gate is no longer active."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY 20K DISTRIBUTIONS UNTOUCHED
+          # --------------------------------------------------------
+
+          verified_20k = 0
+
+          for prop in projections:
+              histogram = prop.get(
+                  "simulation_histogram",
+                  []
+              )
+
+              if not histogram:
+                  continue
+
+              total = sum(
+                  int(row[1])
+                  for row in histogram
+              )
+
+              if total != EXPECTED_SIMS:
+                  raise RuntimeError(
+                      "20K simulation distribution damaged for "
+                      + str(prop.get("player"))
+                      + " / "
+                      + str(prop.get("prop"))
+                  )
+
+              verified_20k += 1
+
+          if verified_20k == 0:
+              raise RuntimeError(
+                  "No 20K distributions found."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY ROLE V2 STILL EXISTS
+          # --------------------------------------------------------
+
+          role_v2 = 0
+
+          for prop in projections:
+              role = prop.get("role", {})
+
+              if (
+                  isinstance(role, dict)
+                  and role.get("role_method")
+                  == "OPPORTUNITY_BLEND_V2"
+              ):
+                  role_v2 += 1
+
+          if role_v2 == 0:
+              raise RuntimeError(
+                  "Role V2 disappeared."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY PICKS ENGINE STILL EXISTS
+          # --------------------------------------------------------
+
+          picks_engine = jpro.get(
+              "jpro_picks_engine",
+              {}
+          )
+
+          if not isinstance(
+              picks_engine,
+              dict
+          ):
+              raise RuntimeError(
+                  "JPro Picks Engine missing."
+              )
+
+          if not picks_engine.get(
+              "availability_enforced"
+          ):
+              raise RuntimeError(
+                  "JPro Picks availability enforcement disappeared."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY AUDIT CONTENT
+          # --------------------------------------------------------
+
+          summary = audit.get(
+              "summary",
+              {}
+          )
+
+          if not isinstance(summary, dict):
+              raise RuntimeError(
+                  "V1.6 summary missing."
+              )
+
+          historical_relationships = int(
+              summary.get(
+                  "historical_relationships",
+                  0
+              )
+          )
+
+          if historical_relationships <= 0:
+              raise RuntimeError(
+                  "No historical teammate relationships generated."
+              )
+
+          absences = audit.get(
+              "current_absences",
+              []
+          )
+
+          adjustments = audit.get(
+              "proposed_adjustments",
+              []
+          )
+
+          aggregates = audit.get(
+              "aggregate_beneficiary_adjustments",
+              []
+          )
+
+          # Absences may legitimately have no usable historical
+          # redistribution relationship. That should NOT fail the
+          # workflow. We want the model to say "insufficient evidence"
+          # instead of inventing an adjustment.
+
+          # --------------------------------------------------------
+          # VERIFY ADJUSTMENTS
+          # --------------------------------------------------------
+
+          allowed_evidence = {
+              "STRONG_SAMPLE",
+              "MODERATE_SAMPLE",
+              "LIMITED_SAMPLE"
+          }
+
+          for item in adjustments:
+              if (
+                  item.get("status")
+                  != "AUDIT_ONLY_NOT_APPLIED"
+              ):
+                  raise RuntimeError(
+                      "Adjustment was unexpectedly applied."
+                  )
+
+              if (
+                  item.get("evidence")
+                  not in allowed_evidence
+              ):
+                  raise RuntimeError(
+                      "Invalid evidence label."
+                  )
+
+              if float(
+                  item.get(
+                      "proposed_target_delta",
+                      0
+                  )
+              ) < 0:
+                  raise RuntimeError(
+                      "Negative proposed target redistribution."
+                  )
+
+              if float(
+                  item.get(
+                      "proposed_carry_delta",
+                      0
+                  )
+              ) < 0:
+                  raise RuntimeError(
+                      "Negative proposed carry redistribution."
+                  )
+
+              if float(
+                  item.get(
+                      "proposed_air_yards_delta",
+                      0
+                  )
+              ) < 0:
+                  raise RuntimeError(
+                      "Negative proposed air-yard redistribution."
+                  )
+
+              absent_id = item.get(
+                  "absent_player_id"
+              )
+
+              beneficiary_id = item.get(
+                  "beneficiary_player_id"
+              )
+
+              if (
+                  absent_id
+                  and beneficiary_id
+                  and absent_id == beneficiary_id
+              ):
+                  raise RuntimeError(
+                      "Player cannot redistribute opportunity to self."
+                  )
+
+          # --------------------------------------------------------
+          # PRINT VERIFICATION
+          # --------------------------------------------------------
+
+          print("Current projection rows:", len(projections))
+          print("20K distributions:", verified_20k)
+          print("Role V2 records:", role_v2)
+
+          print(
+              "Availability gate:",
+              gate.get("version")
+          )
+
+          print(
+              "Availability status:",
+              gate.get("status")
+          )
+
+          print(
+              "Historical relationships:",
+              historical_relationships
+          )
+
+          print(
+              "Current unavailable skill players:",
+              len(absences)
+          )
+
+          print(
+              "Proposed adjustment rows:",
+              len(adjustments)
+          )
+
+          print(
+              "Unique beneficiaries:",
+              len(aggregates)
+          )
+
+          print("")
+          print("=" * 78)
+          print("TOP CURRENT BENEFICIARY AUDIT")
+          print("=" * 78)
+
+          for i, item in enumerate(
+              aggregates[:20],
+              start=1
+          ):
+              print("")
+              print(
+                  f"#{i}",
+                  item.get("player"),
+                  "|",
+                  item.get("team"),
+                  "|",
+                  item.get("position")
+              )
+
+              print(
+                  "  TARGET DELTA:",
+                  item.get(
+                      "proposed_target_delta"
+                  )
+              )
+
+              print(
+                  "  CARRY DELTA:",
+                  item.get(
+                      "proposed_carry_delta"
+                  )
+              )
+
+              print(
+                  "  AIR DELTA:",
+                  item.get(
+                      "proposed_air_yards_delta"
+                  )
+              )
+
+              print(
+                  "  SIGNAL:",
+                  item.get(
+                      "opportunity_signal"
+                  )
+              )
+
+              print(
+                  "  STATUS:",
+                  item.get("status")
+              )
+
+          print("")
+          print("=" * 78)
+          print("JPRO OPPORTUNITY REDISTRIBUTION V1.6 VERIFIED")
+          print("=" * 78)
+
+          print(
+              "AVAILABILITY FOUNDATION: PRESERVED"
+          )
+
+          print(
+              "20K DISTRIBUTIONS: PRESERVED"
+          )
+
+          print(
+              "ROLE V2: PRESERVED"
+          )
+
+          print(
+              "JPRO PICKS: PRESERVED"
+          )
+
+          print(
+              "REDISTRIBUTION MODE: AUDIT ONLY"
+          )
+
+          PY
+
+      # ============================================================
+      # SAVE AUDIT
+      # ============================================================
+
+      - name: Save Opportunity Redistribution V1.6
+        run: |
+          git config user.name "JPro Opportunity Engine"
+          git config user.email "actions@github.com"
+
+          git add data/jpro-opportunity-redistribution-v16.json
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add opportunity redistribution audit V1.6"
+            git push
+          fi
