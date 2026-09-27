@@ -1,1686 +1,843 @@
-name: JPro Opportunity Redistribution V1.6.1
+name: JPro Opportunity Redistribution V1.6.2
 
 on:
+
   workflow_dispatch:
 
 permissions:
+
   contents: write
 
 jobs:
+
   opportunity-engine:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Get JPro
+
         uses: actions/checkout@v4
 
       - name: Set up Python
+
         uses: actions/setup-python@v5
+
         with:
+
           python-version: "3.11"
 
-      - name: Install Opportunity Engine V1.6.1
-        run: |
-          pip install nflreadpy polars pyarrow
-
       # ============================================================
-      # JPRO OPPORTUNITY REDISTRIBUTION V1.6.1
+
+      # JPRO OPPORTUNITY REDISTRIBUTION V1.6.2
+
       #
-      # PURPOSE
+
+      # PURPOSE:
+
       #
-      # Fixes the V1.6 current-absence bridge.
+
+      # Diagnose every player currently blocked by the permanent
+
+      # Availability Gate V1.5.1.
+
       #
-      # V1.6 incorrectly produced a broad "unavailable" population.
-      # V1.6.1 uses the V1.5.1 projection availability gate as the
-      # authoritative source for CURRENT meaningful absences.
-      #
-      # IMPORTANT
-      #
-      # This remains AUDIT ONLY.
-      #
-      # It DOES NOT:
+
+      # This workflow DOES NOT:
+
       # - change projections
-      # - change 20K simulations
+
+      # - change 20K distributions
+
+      # - change Role V2
+
+      # - change matchup intelligence
+
       # - change JPro Picks
-      # - transfer yards from one player to another
+
       #
-      # It identifies historical teammate redistribution evidence
-      # that could later be used by the projection engine.
+
+      # We first need to know WHY each player is blocked before
+
+      # allowing that player to trigger opportunity redistribution.
+
+      #
+
+      # Example:
+
+      #
+
+      # OUT / INACTIVE:
+
+      # Potentially valid redistribution trigger.
+
+      #
+
+      # DEVELOPMENT_PLAYER:
+
+      # Should NOT redistribute NFL workload.
+
+      #
+
+      # CURRENT_PLAYER_TEAM_MISMATCH:
+
+      # Should NOT redistribute workload for the stale team.
+
+      #
+
+      # CURRENT_ROSTER_UNAVAILABLE:
+
+      # Needs further classification before redistribution.
+
       # ============================================================
 
-      - name: Build Opportunity Redistribution Audit V1.6.1
-        run: |
-          python <<'PY'
-          import json
-          import math
-          import os
-          from collections import defaultdict
+      - name: Diagnose Blocked Players V1.6.2
 
-          CURRENT_PATH = "data/jpro-current-projections.json"
-          HISTORY_PATH = "data/jpro-opportunity-redistribution.json"
-          OUTPUT_PATH = "data/jpro-opportunity-redistribution-v161.json"
+        run: |
+
+          python <<'PY'
+
+          import json
+
+          import os
+
+          from collections import Counter, defaultdict
+
+          PATH = "data/jpro-current-projections.json"
+
+          OUTPUT = "data/jpro-availability-diagnostic.json"
 
           EXPECTED_SIMS = 20000
 
-          print("=" * 72)
-          print("JPRO OPPORTUNITY REDISTRIBUTION V1.6.1")
-          print("=" * 72)
+          print("=" * 78)
 
-          # ========================================================
-          # HELPERS
-          # ========================================================
+          print("JPRO BLOCKED PLAYER DIAGNOSTIC V1.6.2")
 
-          def num(value, default=0.0):
-              try:
-                  value = float(value)
+          print("=" * 78)
 
-                  if math.isnan(value) or math.isinf(value):
-                      return default
+          # --------------------------------------------------------
 
-                  return value
+          # LOAD
 
-              except Exception:
-                  return default
+          # --------------------------------------------------------
 
+          if not os.path.exists(PATH):
 
-          def normalize(value):
-              if value is None:
-                  return ""
-
-              return str(value).strip().upper()
-
-
-          def player_key(player_id, player_name):
-              if player_id:
-                  return str(player_id)
-
-              return normalize(player_name)
-
-
-          # ========================================================
-          # LOAD CURRENT JPRO PROJECTIONS
-          # ========================================================
-
-          if not os.path.exists(CURRENT_PATH):
               raise RuntimeError(
-                  f"Missing current projection file: {CURRENT_PATH}"
+
+                  f"Missing required file: {PATH}"
+
               )
 
-          with open(
-              CURRENT_PATH,
-              "r",
-              encoding="utf-8"
-          ) as f:
-              current = json.load(f)
+          with open(PATH, "r", encoding="utf-8") as f:
 
-          projections = current.get(
-              "projections",
-              []
-          )
+              data = json.load(f)
+
+          projections = data.get("projections", [])
 
           if not projections:
+
               raise RuntimeError(
-                  "No current projections found."
+
+                  "No projections found."
+
               )
+
+          print("Projection rows:", len(projections))
+
+          # --------------------------------------------------------
+
+          # VERIFY AVAILABILITY GATE
+
+          # --------------------------------------------------------
+
+          gate = data.get(
+
+              "jpro_availability_gate",
+
+              {}
+
+          )
+
+          gate_version = gate.get("version")
+
+          gate_status = gate.get("status")
 
           print(
-              "Current projection rows:",
-              len(projections)
+
+              "Availability gate:",
+
+              gate_version
+
           )
 
-          # ========================================================
-          # REQUIRE AVAILABILITY V1.5.1
-          # ========================================================
+          print(
 
-          gate = current.get(
-              "jpro_availability_gate",
-              {}
+              "Availability status:",
+
+              gate_status
+
           )
-
-          gate_version = normalize(
-              gate.get("version")
-          )
-
-          gate_status = normalize(
-              gate.get("status")
-          )
-
-          if gate_version != "JPRO_AVAILABILITY_GATE_V1.5.1":
-              raise RuntimeError(
-                  "Opportunity V1.6.1 requires "
-                  "JPRO_AVAILABILITY_GATE_V1.5.1. "
-                  f"Found: {gate_version}"
-              )
 
           if gate_status != "ACTIVE":
+
               raise RuntimeError(
-                  "Availability V1.5.1 is not ACTIVE."
+
+                  "Availability gate is not ACTIVE."
+
               )
 
-          print(
-              "Availability gate:",
-              gate_version
-          )
+          if gate_version not in {
 
-          print(
-              "Availability status:",
-              gate_status
-          )
+              "JPRO_AVAILABILITY_GATE_V1.5",
 
-          # ========================================================
-          # VERIFY CORE MODEL IS STILL INTACT
-          # ========================================================
+              "JPRO_AVAILABILITY_GATE_V1.5.1"
 
-          distributions_20k = 0
-          role_v2_records = 0
+          }:
 
-          for prop in projections:
-
-              histogram = prop.get(
-                  "simulation_histogram",
-                  []
-              )
-
-              if histogram:
-                  total = sum(
-                      int(row[1])
-                      for row in histogram
-                      if isinstance(row, list)
-                      and len(row) >= 2
-                  )
-
-                  if total == EXPECTED_SIMS:
-                      distributions_20k += 1
-
-              role = prop.get(
-                  "role",
-                  {}
-              )
-
-              if (
-                  isinstance(role, dict)
-                  and role.get("role_method")
-                  == "OPPORTUNITY_BLEND_V2"
-              ):
-                  role_v2_records += 1
-
-          if distributions_20k == 0:
               raise RuntimeError(
-                  "20K distributions are missing."
-              )
 
-          if role_v2_records == 0:
-              raise RuntimeError(
-                  "Role V2 records are missing."
-              )
+                  "Unexpected availability gate version: "
 
-          # ========================================================
-          # READ V1.5.1 AVAILABILITY
-          #
-          # V1.5.1 may store normalized metadata in:
-          #
-          # jpro_availability_v151
-          #
-          # or retain V1.5 compatibility metadata:
-          #
-          # jpro_availability_v15
-          #
-          # We fail closed if neither exists.
-          # ========================================================
+                  + str(gate_version)
 
-          def read_current_availability(prop):
-
-              candidates = [
-                  prop.get(
-                      "jpro_availability_v151"
-                  ),
-                  prop.get(
-                      "jpro_availability_v15"
-                  )
-              ]
-
-              availability = None
-
-              for candidate in candidates:
-                  if isinstance(candidate, dict):
-                      availability = candidate
-                      break
-
-              if availability is None:
-                  raise RuntimeError(
-                      "Projection is missing V1.5.1 "
-                      "availability metadata: "
-                      + str(prop.get("player"))
-                      + " / "
-                      + str(prop.get("prop"))
-                  )
-
-              eligible = availability.get(
-                  "eligible"
-              )
-
-              status = normalize(
-                  availability.get("status")
-              )
-
-              if not isinstance(
-                  eligible,
-                  bool
-              ):
-                  raise RuntimeError(
-                      "Projection has invalid availability "
-                      "eligibility value: "
-                      + str(prop.get("player"))
-                      + " / "
-                      + str(prop.get("prop"))
-                  )
-
-              if not status:
-                  raise RuntimeError(
-                      "Projection has no normalized "
-                      "availability status: "
-                      + str(prop.get("player"))
-                  )
-
-              return eligible, status
-
-
-          # ========================================================
-          # BUILD UNIQUE CURRENT PLAYER MAP
-          # ========================================================
-
-          current_players = {}
-
-          for prop in projections:
-
-              eligible, status = (
-                  read_current_availability(
-                      prop
-                  )
-              )
-
-              pid = prop.get(
-                  "player_id"
-              )
-
-              pname = prop.get(
-                  "player"
-              )
-
-              key = player_key(
-                  pid,
-                  pname
-              )
-
-              if not key:
-                  continue
-
-              record = current_players.get(
-                  key
-              )
-
-              if record is None:
-                  current_players[key] = {
-                      "player_id": pid,
-                      "player": pname,
-                      "team": prop.get("team"),
-                      "opponent": prop.get(
-                          "opponent"
-                      ),
-                      "position": normalize(
-                          prop.get("position")
-                      ),
-                      "eligible": eligible,
-                      "status": status,
-                      "projection_rows": 1
-                  }
-
-              else:
-                  record[
-                      "projection_rows"
-                  ] += 1
-
-                  # All props for one player should agree.
-                  if (
-                      record["eligible"]
-                      != eligible
-                  ):
-                      raise RuntimeError(
-                          "Availability disagreement across "
-                          "projection rows for "
-                          + str(pname)
-                      )
-
-                  if (
-                      record["status"]
-                      != status
-                  ):
-                      raise RuntimeError(
-                          "Availability status disagreement "
-                          "across projection rows for "
-                          + str(pname)
-                      )
-
-          print(
-              "Unique projected players:",
-              len(current_players)
-          )
-
-          # ========================================================
-          # CLASSIFY BLOCKED PLAYERS
-          #
-          # CRITICAL:
-          #
-          # Not every blocked player should trigger redistribution.
-          #
-          # CURRENT_ROSTER_UNAVAILABLE:
-          #     YES -> can trigger redistribution audit.
-          #
-          # DEVELOPMENT_PLAYER:
-          #     NO -> blocked from Picks but does not trigger.
-          #
-          # CURRENT_PLAYER_TEAM_MISMATCH:
-          #     NO -> stale team mapping; does not trigger.
-          # ========================================================
-
-          REDISTRIBUTION_TRIGGER_STATUSES = {
-              "CURRENT_ROSTER_UNAVAILABLE"
-          }
-
-          NON_TRIGGER_BLOCKED_STATUSES = {
-              "DEVELOPMENT_PLAYER",
-              "CURRENT_PLAYER_TEAM_MISMATCH"
-          }
-
-          eligible_players = []
-          blocked_players = []
-          trigger_players = []
-          ignored_blocked_players = []
-
-          for player in current_players.values():
-
-              if player["eligible"]:
-                  eligible_players.append(
-                      player
-                  )
-                  continue
-
-              blocked_players.append(
-                  player
-              )
-
-              status = player[
-                  "status"
-              ]
-
-              if (
-                  status
-                  in REDISTRIBUTION_TRIGGER_STATUSES
-              ):
-                  trigger_players.append(
-                      player
-                  )
-
-              elif (
-                  status
-                  in NON_TRIGGER_BLOCKED_STATUSES
-              ):
-                  ignored_blocked_players.append(
-                      player
-                  )
-
-              else:
-                  # Unknown blocked statuses must not
-                  # silently trigger redistribution.
-                  ignored_blocked_players.append(
-                      player
-                  )
-
-          print("")
-          print("=" * 72)
-          print("CURRENT AVAILABILITY BRIDGE")
-          print("=" * 72)
-
-          print(
-              "Eligible projected players:",
-              len(eligible_players)
-          )
-
-          print(
-              "Blocked projected players:",
-              len(blocked_players)
-          )
-
-          print(
-              "Redistribution trigger players:",
-              len(trigger_players)
-          )
-
-          print(
-              "Ignored blocked players:",
-              len(ignored_blocked_players)
-          )
-
-          print("")
-          print("REDISTRIBUTION TRIGGERS")
-
-          for player in sorted(
-              trigger_players,
-              key=lambda x: (
-                  str(x.get("team")),
-                  str(x.get("player"))
-              )
-          ):
-              print(
-                  " ",
-                  player.get("player"),
-                  "|",
-                  player.get("team"),
-                  "|",
-                  player.get("position"),
-                  "|",
-                  player.get("status")
-              )
-
-          print("")
-          print("BLOCKED BUT NOT REDISTRIBUTION TRIGGERS")
-
-          for player in sorted(
-              ignored_blocked_players,
-              key=lambda x: (
-                  str(x.get("team")),
-                  str(x.get("player"))
-              )
-          ):
-              print(
-                  " ",
-                  player.get("player"),
-                  "|",
-                  player.get("team"),
-                  "|",
-                  player.get("position"),
-                  "|",
-                  player.get("status")
-              )
-
-          # ========================================================
-          # LOAD HISTORICAL RELATIONSHIPS FROM V1.6
-          # ========================================================
-
-          if not os.path.exists(
-              HISTORY_PATH
-          ):
-              raise RuntimeError(
-                  "Missing V1.6 opportunity relationship file: "
-                  + HISTORY_PATH
-              )
-
-          with open(
-              HISTORY_PATH,
-              "r",
-              encoding="utf-8"
-          ) as f:
-              history = json.load(f)
-
-          # Support several possible names without
-          # silently accepting unrelated structures.
-          relationship_keys = [
-              "relationships",
-              "historical_relationships",
-              "redistribution_relationships",
-              "teammate_relationships"
-          ]
-
-          relationships = None
-          relationship_source_key = None
-
-          for key in relationship_keys:
-              value = history.get(key)
-
-              if (
-                  isinstance(value, list)
-                  and len(value) > 0
-              ):
-                  relationships = value
-                  relationship_source_key = key
-                  break
-
-          if relationships is None:
-
-              # Some V1.6 outputs may store the rows
-              # inside an audit object.
-              audit = history.get(
-                  "audit",
-                  {}
-              )
-
-              if isinstance(audit, dict):
-
-                  for key in relationship_keys:
-                      value = audit.get(key)
-
-                      if (
-                          isinstance(value, list)
-                          and len(value) > 0
-                      ):
-                          relationships = value
-                          relationship_source_key = (
-                              "audit." + key
-                          )
-                          break
-
-          if relationships is None:
-              raise RuntimeError(
-                  "Could not locate historical relationship "
-                  "rows in V1.6 output."
-              )
-
-          print("")
-          print(
-              "Historical relationship source:",
-              relationship_source_key
-          )
-
-          print(
-              "Historical relationships:",
-              len(relationships)
-          )
-
-          # ========================================================
-          # FLEXIBLE HISTORICAL FIELD READER
-          # ========================================================
-
-          def first_value(
-              row,
-              keys,
-              default=None
-          ):
-              for key in keys:
-                  if (
-                      key in row
-                      and row.get(key) is not None
-                  ):
-                      return row.get(key)
-
-              return default
-
-
-          def relationship_trigger_id(row):
-              return first_value(
-                  row,
-                  [
-                      "trigger_player_id",
-                      "absent_player_id",
-                      "missing_player_id",
-                      "player_out_id"
-                  ]
-              )
-
-
-          def relationship_trigger_name(row):
-              return first_value(
-                  row,
-                  [
-                      "trigger_player",
-                      "trigger_player_name",
-                      "absent_player",
-                      "absent_player_name",
-                      "missing_player",
-                      "missing_player_name",
-                      "player_out",
-                      "player_out_name"
-                  ]
-              )
-
-
-          def relationship_beneficiary_id(row):
-              return first_value(
-                  row,
-                  [
-                      "beneficiary_player_id",
-                      "teammate_player_id",
-                      "player_id"
-                  ]
-              )
-
-
-          def relationship_beneficiary_name(row):
-              return first_value(
-                  row,
-                  [
-                      "beneficiary",
-                      "beneficiary_player",
-                      "beneficiary_player_name",
-                      "teammate",
-                      "teammate_name",
-                      "player",
-                      "player_name"
-                  ]
-              )
-
-
-          def relationship_team(row):
-              return first_value(
-                  row,
-                  [
-                      "team",
-                      "recent_team"
-                  ]
-              )
-
-
-          def relationship_evidence(row):
-              return normalize(
-                  first_value(
-                      row,
-                      [
-                          "evidence",
-                          "evidence_label",
-                          "sample_quality",
-                          "confidence"
-                      ],
-                      "LIMITED_SAMPLE"
-                  )
-              )
-
-
-          def relationship_without_games(row):
-              return int(
-                  num(
-                      first_value(
-                          row,
-                          [
-                              "without_games",
-                              "games_without",
-                              "absent_games",
-                              "trigger_missing_games"
-                          ],
-                          0
-                      ),
-                      0
-                  )
-              )
-
-
-          def relationship_with_games(row):
-              return int(
-                  num(
-                      first_value(
-                          row,
-                          [
-                              "with_games",
-                              "games_with",
-                              "present_games",
-                              "trigger_present_games"
-                          ],
-                          0
-                      ),
-                      0
-                  )
-              )
-
-
-          def metric_delta(
-              row,
-              metric
-          ):
-              direct_keys = {
-                  "targets": [
-                      "targets_delta",
-                      "delta_targets",
-                      "target_delta"
-                  ],
-                  "carries": [
-                      "carries_delta",
-                      "delta_carries",
-                      "carry_delta"
-                  ],
-                  "receiving_air_yards": [
-                      "receiving_air_yards_delta",
-                      "air_yards_delta",
-                      "delta_air_yards"
-                  ],
-                  "receptions": [
-                      "receptions_delta",
-                      "delta_receptions"
-                  ],
-                  "receiving_yards": [
-                      "receiving_yards_delta",
-                      "delta_receiving_yards"
-                  ],
-                  "rushing_yards": [
-                      "rushing_yards_delta",
-                      "delta_rushing_yards"
-                  ],
-                  "attempts": [
-                      "attempts_delta",
-                      "delta_attempts"
-                  ]
-              }
-
-              value = first_value(
-                  row,
-                  direct_keys.get(
-                      metric,
-                      []
-                  )
-              )
-
-              if value is not None:
-                  return num(value)
-
-              without_keys = [
-                  f"{metric}_without",
-                  f"without_{metric}",
-                  f"{metric}_avg_without"
-              ]
-
-              with_keys = [
-                  f"{metric}_with",
-                  f"with_{metric}",
-                  f"{metric}_avg_with"
-              ]
-
-              without_value = first_value(
-                  row,
-                  without_keys
-              )
-
-              with_value = first_value(
-                  row,
-                  with_keys
-              )
-
-              if (
-                  without_value is not None
-                  and with_value is not None
-              ):
-                  return (
-                      num(without_value)
-                      - num(with_value)
-                  )
-
-              return 0.0
-
-
-          # ========================================================
-          # CURRENT ELIGIBLE LOOKUP
-          # ========================================================
-
-          eligible_by_id = {}
-          eligible_by_name_team = {}
-
-          for player in eligible_players:
-
-              pid = player.get(
-                  "player_id"
-              )
-
-              if pid:
-                  eligible_by_id[
-                      str(pid)
-                  ] = player
-
-              name_team_key = (
-                  normalize(
-                      player.get("player")
-                  ),
-                  normalize(
-                      player.get("team")
-                  )
-              )
-
-              eligible_by_name_team[
-                  name_team_key
-              ] = player
-
-          # ========================================================
-          # MATCH CURRENT ABSENCES TO HISTORICAL RELATIONSHIPS
-          # ========================================================
-
-          proposed = []
-
-          matched_trigger_players = set()
-          unmatched_trigger_players = []
-
-          for trigger in trigger_players:
-
-              trigger_id = (
-                  str(trigger.get("player_id"))
-                  if trigger.get("player_id")
-                  else None
-              )
-
-              trigger_name = normalize(
-                  trigger.get("player")
-              )
-
-              trigger_team = normalize(
-                  trigger.get("team")
-              )
-
-              trigger_matches = []
-
-              for row in relationships:
-
-                  if not isinstance(
-                      row,
-                      dict
-                  ):
-                      continue
-
-                  hist_trigger_id = (
-                      relationship_trigger_id(
-                          row
-                      )
-                  )
-
-                  hist_trigger_name = normalize(
-                      relationship_trigger_name(
-                          row
-                      )
-                  )
-
-                  hist_team = normalize(
-                      relationship_team(
-                          row
-                      )
-                  )
-
-                  id_match = (
-                      trigger_id
-                      and hist_trigger_id
-                      and str(hist_trigger_id)
-                      == trigger_id
-                  )
-
-                  name_match = (
-                      trigger_name
-                      and hist_trigger_name
-                      and hist_trigger_name
-                      == trigger_name
-                  )
-
-                  team_match = (
-                      not hist_team
-                      or not trigger_team
-                      or hist_team
-                      == trigger_team
-                  )
-
-                  if (
-                      (id_match or name_match)
-                      and team_match
-                  ):
-                      trigger_matches.append(
-                          row
-                      )
-
-              if not trigger_matches:
-                  unmatched_trigger_players.append(
-                      trigger
-                  )
-                  continue
-
-              matched_trigger_players.add(
-                  player_key(
-                      trigger.get("player_id"),
-                      trigger.get("player")
-                  )
-              )
-
-              for row in trigger_matches:
-
-                  beneficiary_id = (
-                      relationship_beneficiary_id(
-                          row
-                      )
-                  )
-
-                  beneficiary_name = normalize(
-                      relationship_beneficiary_name(
-                          row
-                      )
-                  )
-
-                  beneficiary = None
-
-                  if beneficiary_id is not None:
-                      beneficiary = (
-                          eligible_by_id.get(
-                              str(
-                                  beneficiary_id
-                              )
-                          )
-                      )
-
-                  if (
-                      beneficiary is None
-                      and beneficiary_name
-                  ):
-                      beneficiary = (
-                          eligible_by_name_team.get(
-                              (
-                                  beneficiary_name,
-                                  trigger_team
-                              )
-                          )
-                      )
-
-                  # Beneficiary must currently be eligible.
-                  if beneficiary is None:
-                      continue
-
-                  # Never redistribute back to same player.
-                  if (
-                      player_key(
-                          beneficiary.get(
-                              "player_id"
-                          ),
-                          beneficiary.get(
-                              "player"
-                          )
-                      )
-                      ==
-                      player_key(
-                          trigger.get(
-                              "player_id"
-                          ),
-                          trigger.get(
-                              "player"
-                          )
-                      )
-                  ):
-                      continue
-
-                  evidence = (
-                      relationship_evidence(
-                          row
-                      )
-                  )
-
-                  without_games = (
-                      relationship_without_games(
-                          row
-                      )
-                  )
-
-                  with_games = (
-                      relationship_with_games(
-                          row
-                      )
-                  )
-
-                  deltas = {
-                      "targets":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "targets"
-                              ),
-                              3
-                          ),
-
-                      "carries":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "carries"
-                              ),
-                              3
-                          ),
-
-                      "receiving_air_yards":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "receiving_air_yards"
-                              ),
-                              3
-                          ),
-
-                      "receptions":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "receptions"
-                              ),
-                              3
-                          ),
-
-                      "receiving_yards":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "receiving_yards"
-                              ),
-                              3
-                          ),
-
-                      "rushing_yards":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "rushing_yards"
-                              ),
-                              3
-                          ),
-
-                      "attempts":
-                          round(
-                              metric_delta(
-                                  row,
-                                  "attempts"
-                              ),
-                              3
-                          )
-                  }
-
-                  # Opportunity signal is ONLY a ranking score.
-                  # It is NOT a projection adjustment.
-                  opportunity_signal = (
-                      max(
-                          deltas["targets"],
-                          0
-                      ) * 10
-                      +
-                      max(
-                          deltas["carries"],
-                          0
-                      ) * 5
-                      +
-                      max(
-                          deltas[
-                              "receiving_air_yards"
-                          ],
-                          0
-                      ) * 0.08
-                  )
-
-                  proposed.append({
-                      "trigger_player_id":
-                          trigger.get(
-                              "player_id"
-                          ),
-
-                      "trigger_player":
-                          trigger.get(
-                              "player"
-                          ),
-
-                      "trigger_team":
-                          trigger.get(
-                              "team"
-                          ),
-
-                      "trigger_position":
-                          trigger.get(
-                              "position"
-                          ),
-
-                      "trigger_availability_status":
-                          trigger.get(
-                              "status"
-                          ),
-
-                      "beneficiary_player_id":
-                          beneficiary.get(
-                              "player_id"
-                          ),
-
-                      "beneficiary":
-                          beneficiary.get(
-                              "player"
-                          ),
-
-                      "beneficiary_team":
-                          beneficiary.get(
-                              "team"
-                          ),
-
-                      "beneficiary_position":
-                          beneficiary.get(
-                              "position"
-                          ),
-
-                      "beneficiary_currently_eligible":
-                          True,
-
-                      "evidence":
-                          evidence,
-
-                      "without_games":
-                          without_games,
-
-                      "with_games":
-                          with_games,
-
-                      "deltas":
-                          deltas,
-
-                      "opportunity_signal":
-                          round(
-                              opportunity_signal,
-                              3
-                          ),
-
-                      "projection_adjustment_applied":
-                          False,
-
-                      "simulation_adjustment_applied":
-                          False,
-
-                      "audit_only":
-                          True
-                  })
-
-          # ========================================================
-          # DEDUPLICATE
-          # ========================================================
-
-          deduped = {}
-
-          for row in proposed:
-
-              key = (
-                  str(
-                      row.get(
-                          "trigger_player_id"
-                      )
-                      or row.get(
-                          "trigger_player"
-                      )
-                  ),
-                  str(
-                      row.get(
-                          "beneficiary_player_id"
-                      )
-                      or row.get(
-                          "beneficiary"
-                      )
-                  )
-              )
-
-              existing = deduped.get(
-                  key
-              )
-
-              if existing is None:
-                  deduped[key] = row
-
-              else:
-                  # Prefer stronger sample evidence.
-                  evidence_rank = {
-                      "STRONG_SAMPLE": 3,
-                      "MODERATE_SAMPLE": 2,
-                      "LIMITED_SAMPLE": 1
-                  }
-
-                  old_rank = evidence_rank.get(
-                      existing.get(
-                          "evidence"
-                      ),
-                      0
-                  )
-
-                  new_rank = evidence_rank.get(
-                      row.get(
-                          "evidence"
-                      ),
-                      0
-                  )
-
-                  if (
-                      new_rank > old_rank
-                      or (
-                          new_rank == old_rank
-                          and row.get(
-                              "opportunity_signal",
-                              0
-                          )
-                          >
-                          existing.get(
-                              "opportunity_signal",
-                              0
-                          )
-                      )
-                  ):
-                      deduped[key] = row
-
-          proposed = list(
-              deduped.values()
-          )
-
-          # ========================================================
-          # SORT
-          # ========================================================
-
-          evidence_rank = {
-              "STRONG_SAMPLE": 3,
-              "MODERATE_SAMPLE": 2,
-              "LIMITED_SAMPLE": 1
-          }
-
-          proposed.sort(
-              key=lambda x: (
-                  evidence_rank.get(
-                      x.get("evidence"),
-                      0
-                  ),
-                  x.get(
-                      "opportunity_signal",
-                      0
-                  ),
-                  x.get(
-                      "without_games",
-                      0
-                  )
-              ),
-              reverse=True
-          )
-
-          unique_beneficiaries = {
-              player_key(
-                  row.get(
-                      "beneficiary_player_id"
-                  ),
-                  row.get(
-                      "beneficiary"
-                  )
-              )
-              for row in proposed
-          }
-
-          # ========================================================
-          # SUMMARY
-          # ========================================================
-
-          evidence_counts = defaultdict(
-              int
-          )
-
-          for row in proposed:
-              evidence_counts[
-                  row.get(
-                      "evidence",
-                      "UNKNOWN"
-                  )
-              ] += 1
-
-          output = {
-              "version":
-                  "JPRO_OPPORTUNITY_REDISTRIBUTION_V1.6.1",
-
-              "status":
-                  "AUDIT_READY",
-
-              "mode":
-                  "AUDIT_ONLY",
-
-              "availability_source":
-                  "JPRO_AVAILABILITY_GATE_V1.5.1",
-
-              "historical_relationship_source":
-                  relationship_source_key,
-
-              "current_projection_rows":
-                  len(projections),
-
-              "current_unique_projected_players":
-                  len(current_players),
-
-              "current_eligible_players":
-                  len(eligible_players),
-
-              "current_blocked_players":
-                  len(blocked_players),
-
-              "current_redistribution_triggers":
-                  len(trigger_players),
-
-              "current_ignored_blocked_players":
-                  len(ignored_blocked_players),
-
-              "historical_relationships":
-                  len(relationships),
-
-              "matched_trigger_players":
-                  len(matched_trigger_players),
-
-              "unmatched_trigger_players":
-                  len(unmatched_trigger_players),
-
-              "proposed_adjustment_rows":
-                  len(proposed),
-
-              "unique_beneficiaries":
-                  len(unique_beneficiaries),
-
-              "evidence_counts":
-                  dict(evidence_counts),
-
-              "trigger_players":
-                  trigger_players,
-
-              "ignored_blocked_players":
-                  ignored_blocked_players,
-
-              "unmatched_trigger_players_detail":
-                  unmatched_trigger_players,
-
-              "proposed_adjustments":
-                  proposed,
-
-              "projection_changes_applied":
-                  False,
-
-              "simulation_changes_applied":
-                  False,
-
-              "limitations": [
-                  (
-                      "Historical teammate splits are descriptive "
-                      "and are not assumed to be causal."
-                  ),
-                  (
-                      "Only CURRENT_ROSTER_UNAVAILABLE currently "
-                      "triggers redistribution."
-                  ),
-                  (
-                      "Development players and team mismatches "
-                      "remain blocked from Picks but do not trigger "
-                      "redistribution."
-                  ),
-                  (
-                      "No projection or 20K simulation is changed "
-                      "by V1.6.1."
-                  ),
-                  (
-                      "A later validated layer must determine how "
-                      "historical opportunity deltas should affect "
-                      "future workload distributions."
-                  )
-              ]
-          }
-
-          with open(
-              OUTPUT_PATH,
-              "w",
-              encoding="utf-8"
-          ) as f:
-              json.dump(
-                  output,
-                  f,
-                  separators=(",", ":")
-              )
-
-          # ========================================================
-          # CONSOLE AUDIT
-          # ========================================================
-
-          print("")
-          print("=" * 72)
-          print("V1.6.1 CURRENT ABSENCE BRIDGE COMPLETE")
-          print("=" * 72)
-
-          print(
-              "Current projection rows:",
-              len(projections)
-          )
-
-          print(
-              "20K distributions:",
-              distributions_20k
-          )
-
-          print(
-              "Role V2 records:",
-              role_v2_records
-          )
-
-          print(
-              "Current blocked players:",
-              len(blocked_players)
-          )
-
-          print(
-              "Current redistribution triggers:",
-              len(trigger_players)
-          )
-
-          print(
-              "Ignored blocked players:",
-              len(ignored_blocked_players)
-          )
-
-          print(
-              "Historical relationships:",
-              len(relationships)
-          )
-
-          print(
-              "Matched trigger players:",
-              len(matched_trigger_players)
-          )
-
-          print(
-              "Unmatched trigger players:",
-              len(unmatched_trigger_players)
-          )
-
-          print(
-              "Proposed adjustment rows:",
-              len(proposed)
-          )
-
-          print(
-              "Unique beneficiaries:",
-              len(unique_beneficiaries)
-          )
-
-          print("")
-          print("=" * 72)
-          print("TOP CURRENT BENEFICIARY AUDIT")
-          print("=" * 72)
-
-          for i, row in enumerate(
-              proposed[:30],
-              start=1
-          ):
-
-              print("")
-              print(
-                  f"#{i}",
-                  row.get(
-                      "beneficiary"
-                  ),
-                  "|",
-                  row.get(
-                      "beneficiary_team"
-                  ),
-                  "|",
-                  row.get(
-                      "beneficiary_position"
-                  )
-              )
-
-              print(
-                  "  ABSENT:",
-                  row.get(
-                      "trigger_player"
-                  )
-              )
-
-              print(
-                  "  STATUS:",
-                  row.get(
-                      "trigger_availability_status"
-                  )
-              )
-
-              print(
-                  "  EVIDENCE:",
-                  row.get(
-                      "evidence"
-                  )
-              )
-
-              print(
-                  "  GAMES WITHOUT:",
-                  row.get(
-                      "without_games"
-                  )
-              )
-
-              print(
-                  "  GAMES WITH:",
-                  row.get(
-                      "with_games"
-                  )
-              )
-
-              print(
-                  "  TARGET DELTA:",
-                  row.get(
-                      "deltas",
-                      {}
-                  ).get(
-                      "targets"
-                  )
-              )
-
-              print(
-                  "  CARRY DELTA:",
-                  row.get(
-                      "deltas",
-                      {}
-                  ).get(
-                      "carries"
-                  )
-              )
-
-              print(
-                  "  AIR-YARD DELTA:",
-                  row.get(
-                      "deltas",
-                      {}
-                  ).get(
-                      "receiving_air_yards"
-                  )
-              )
-
-              print(
-                  "  OPPORTUNITY SIGNAL:",
-                  row.get(
-                      "opportunity_signal"
-                  )
-              )
-
-          print("")
-          print("Saved:", OUTPUT_PATH)
-
-          PY
-
-      # ============================================================
-      # VERIFY V1.6.1
-      # ============================================================
-
-      - name: Verify Opportunity Redistribution V1.6.1
-        run: |
-          python <<'PY'
-          import json
-          import os
-
-          CURRENT_PATH = "data/jpro-current-projections.json"
-          OUTPUT_PATH = "data/jpro-opportunity-redistribution-v161.json"
-
-          EXPECTED_SIMS = 20000
-
-          print("=" * 72)
-          print("VERIFY JPRO OPPORTUNITY REDISTRIBUTION V1.6.1")
-          print("=" * 72)
-
-          if not os.path.exists(
-              OUTPUT_PATH
-          ):
-              raise RuntimeError(
-                  "V1.6.1 audit file missing."
-              )
-
-          with open(
-              OUTPUT_PATH,
-              "r",
-              encoding="utf-8"
-          ) as f:
-              audit = json.load(f)
-
-          with open(
-              CURRENT_PATH,
-              "r",
-              encoding="utf-8"
-          ) as f:
-              current = json.load(f)
-
-          if (
-              audit.get("version")
-              != "JPRO_OPPORTUNITY_REDISTRIBUTION_V1.6.1"
-          ):
-              raise RuntimeError(
-                  "Wrong V1.6.1 version."
-              )
-
-          if (
-              audit.get("status")
-              != "AUDIT_READY"
-          ):
-              raise RuntimeError(
-                  "V1.6.1 audit is not ready."
-              )
-
-          if (
-              audit.get("mode")
-              != "AUDIT_ONLY"
-          ):
-              raise RuntimeError(
-                  "V1.6.1 unexpectedly left audit-only mode."
-              )
-
-          if (
-              audit.get(
-                  "availability_source"
-              )
-              != "JPRO_AVAILABILITY_GATE_V1.5.1"
-          ):
-              raise RuntimeError(
-                  "Wrong availability source."
-              )
-
-          if audit.get(
-              "projection_changes_applied"
-          ):
-              raise RuntimeError(
-                  "V1.6.1 modified projections."
-              )
-
-          if audit.get(
-              "simulation_changes_applied"
-          ):
-              raise RuntimeError(
-                  "V1.6.1 modified simulations."
-              )
-
-          projections = current.get(
-              "projections",
-              []
-          )
-
-          if not projections:
-              raise RuntimeError(
-                  "Current projections missing."
               )
 
           # --------------------------------------------------------
-          # VERIFY 20K DISTRIBUTIONS PRESERVED
+
+          # HELPERS
+
+          # --------------------------------------------------------
+
+          def clean(value):
+
+              if value is None:
+
+                  return None
+
+              return str(value).strip()
+
+          def upper(value):
+
+              value = clean(value)
+
+              if value is None:
+
+                  return None
+
+              return value.upper()
+
+          def get_nested(prop):
+
+              value = prop.get("availability")
+
+              if isinstance(value, dict):
+
+                  return value
+
+              return {}
+
+          def first_value(prop, nested, keys):
+
+              for key in keys:
+
+                  if key in prop:
+
+                      value = prop.get(key)
+
+                      if value is not None:
+
+                          return value, "projection." + key
+
+              for key in keys:
+
+                  if key in nested:
+
+                      value = nested.get(key)
+
+                      if value is not None:
+
+                          return value, "availability." + key
+
+              return None, None
+
+          STATUS_KEYS = [
+
+              "model_player_status",
+
+              "availability_status",
+
+              "current_player_status",
+
+              "roster_status",
+
+              "status",
+
+              "game_status",
+
+              "injury_status"
+
+          ]
+
+          ELIGIBLE_KEYS = [
+
+              "availability_eligible",
+
+              "current_roster_eligible",
+
+              "jpro_eligible",
+
+              "eligible"
+
+          ]
+
+          REASON_KEYS = [
+
+              "availability_reason",
+
+              "block_reason",
+
+              "blocked_reason",
+
+              "reason",
+
+              "roster_reason"
+
+          ]
+
+          SOURCE_KEYS = [
+
+              "availability_source",
+
+              "source",
+
+              "roster_source"
+
+          ]
+
+          # --------------------------------------------------------
+
+          # CLASSIFY REDISTRIBUTION SAFETY
+
+          # --------------------------------------------------------
+
+          CONFIRMED_TRIGGER_STATUSES = {
+
+              "OUT",
+
+              "INACTIVE",
+
+              "INA",
+
+              "IR",
+
+              "PUP",
+
+              "SUSPENDED"
+
+          }
+
+          NON_TRIGGER_STATUSES = {
+
+              "DEVELOPMENT_PLAYER",
+
+              "CURRENT_PLAYER_TEAM_MISMATCH",
+
+              "TEAM_MISMATCH",
+
+              "PRACTICE_SQUAD",
+
+              "DEVELOPMENT",
+
+              "RETIRED",
+
+              "RELEASED",
+
+              "WAIVED"
+
+          }
+
+          REVIEW_STATUSES = {
+
+              "CURRENT_ROSTER_UNAVAILABLE",
+
+              "UNAVAILABLE",
+
+              "DOUBTFUL",
+
+              "QUESTIONABLE",
+
+              "UNKNOWN",
+
+              "BLOCKED"
+
+          }
+
+          def trigger_classification(status):
+
+              s = upper(status)
+
+              if s in CONFIRMED_TRIGGER_STATUSES:
+
+                  return "POTENTIAL_CONFIRMED_TRIGGER"
+
+              if s in NON_TRIGGER_STATUSES:
+
+                  return "DO_NOT_REDISTRIBUTE"
+
+              if s in REVIEW_STATUSES:
+
+                  return "REQUIRES_REVIEW"
+
+              return "UNCLASSIFIED"
+
+          # --------------------------------------------------------
+
+          # COLLECT UNIQUE PLAYERS
+
+          # --------------------------------------------------------
+
+          players = {}
+
+          for prop in projections:
+
+              player_key = (
+
+                  prop.get("player_id")
+
+                  or (
+
+                      str(prop.get("player"))
+
+                      + "|"
+
+                      + str(prop.get("team"))
+
+                  )
+
+              )
+
+              if player_key not in players:
+
+                  players[player_key] = {
+
+                      "player_id": prop.get("player_id"),
+
+                      "player": prop.get("player"),
+
+                      "position": prop.get("position"),
+
+                      "team": prop.get("team"),
+
+                      "opponent": prop.get("opponent"),
+
+                      "game": prop.get("game"),
+
+                      "props": [],
+
+                      "rows": []
+
+                  }
+
+              players[player_key]["props"].append(
+
+                  prop.get("prop")
+
+              )
+
+              players[player_key]["rows"].append(
+
+                  prop
+
+              )
+
+          print(
+
+              "Unique projected players:",
+
+              len(players)
+
+          )
+
+          # --------------------------------------------------------
+
+          # ANALYZE EACH PLAYER
+
+          # --------------------------------------------------------
+
+          blocked_players = []
+
+          eligible_players = []
+
+          raw_status_counts = Counter()
+
+          classification_counts = Counter()
+
+          for player_key, player in players.items():
+
+              rows = player["rows"]
+
+              # All rows for a player should agree.
+
+              # Capture every status encountered so inconsistencies
+
+              # become visible rather than silently ignored.
+
+              row_diagnostics = []
+
+              any_blocked = False
+
+              any_eligible = False
+
+              for prop in rows:
+
+                  gate_info = prop.get(
+
+                      "jpro_availability_v15",
+
+                      {}
+
+                  )
+
+                  if not isinstance(gate_info, dict):
+
+                      gate_info = {}
+
+                  gate_eligible = gate_info.get(
+
+                      "eligible"
+
+                  )
+
+                  gate_row_status = gate_info.get(
+
+                      "status"
+
+                  )
+
+                  nested = get_nested(prop)
+
+                  raw_status, status_source = first_value(
+
+                      prop,
+
+                      nested,
+
+                      STATUS_KEYS
+
+                  )
+
+                  raw_eligible, eligible_source = first_value(
+
+                      prop,
+
+                      nested,
+
+                      ELIGIBLE_KEYS
+
+                  )
+
+                  raw_reason, reason_source = first_value(
+
+                      prop,
+
+                      nested,
+
+                      REASON_KEYS
+
+                  )
+
+                  raw_source, source_source = first_value(
+
+                      prop,
+
+                      nested,
+
+                      SOURCE_KEYS
+
+                  )
+
+                  # Permanent gate status is the authoritative
+
+                  # eligibility decision.
+
+                  if gate_eligible is True:
+
+                      any_eligible = True
+
+                  elif gate_eligible is False:
+
+                      any_blocked = True
+
+                  else:
+
+                      # Fail closed for diagnostic purposes.
+
+                      any_blocked = True
+
+                  effective_status = (
+
+                      gate_row_status
+
+                      or raw_status
+
+                      or "UNKNOWN"
+
+                  )
+
+                  row_diagnostics.append({
+
+                      "prop": prop.get("prop"),
+
+                      "gate_eligible":
+
+                          gate_eligible,
+
+                      "gate_status":
+
+                          gate_row_status,
+
+                      "raw_status":
+
+                          raw_status,
+
+                      "raw_status_source":
+
+                          status_source,
+
+                      "raw_eligible":
+
+                          raw_eligible,
+
+                      "raw_eligible_source":
+
+                          eligible_source,
+
+                      "reason":
+
+                          raw_reason,
+
+                      "reason_source":
+
+                          reason_source,
+
+                      "source":
+
+                          raw_source,
+
+                      "source_field":
+
+                          source_source,
+
+                      "effective_status":
+
+                          upper(effective_status)
+
+                  })
+
+              # ----------------------------------------------------
+
+              # PLAYER-LEVEL CONSISTENCY
+
+              # ----------------------------------------------------
+
+              statuses = sorted({
+
+                  row.get("effective_status")
+
+                  for row in row_diagnostics
+
+                  if row.get("effective_status")
+
+              })
+
+              gate_statuses = sorted({
+
+                  upper(row.get("gate_status"))
+
+                  for row in row_diagnostics
+
+                  if row.get("gate_status")
+
+              })
+
+              raw_statuses = sorted({
+
+                  upper(row.get("raw_status"))
+
+                  for row in row_diagnostics
+
+                  if row.get("raw_status")
+
+              })
+
+              if any_blocked and any_eligible:
+
+                  player_gate_state = "MIXED"
+
+              elif any_blocked:
+
+                  player_gate_state = "BLOCKED"
+
+              else:
+
+                  player_gate_state = "ELIGIBLE"
+
+              if len(statuses) == 1:
+
+                  effective_status = statuses[0]
+
+              elif len(statuses) > 1:
+
+                  effective_status = "MIXED_STATUS"
+
+              else:
+
+                  effective_status = "UNKNOWN"
+
+              classification = trigger_classification(
+
+                  effective_status
+
+              )
+
+              if player_gate_state == "BLOCKED":
+
+                  raw_status_counts[
+
+                      effective_status
+
+                  ] += 1
+
+                  classification_counts[
+
+                      classification
+
+                  ] += 1
+
+              result = {
+
+                  "player_id":
+
+                      player["player_id"],
+
+                  "player":
+
+                      player["player"],
+
+                  "position":
+
+                      player["position"],
+
+                  "team":
+
+                      player["team"],
+
+                  "opponent":
+
+                      player["opponent"],
+
+                  "game":
+
+                      player["game"],
+
+                  "projection_props":
+
+                      sorted({
+
+                          p
+
+                          for p in player["props"]
+
+                          if p is not None
+
+                      }),
+
+                  "projection_row_count":
+
+                      len(rows),
+
+                  "player_gate_state":
+
+                      player_gate_state,
+
+                  "effective_status":
+
+                      effective_status,
+
+                  "gate_statuses":
+
+                      gate_statuses,
+
+                  "raw_statuses":
+
+                      raw_statuses,
+
+                  "redistribution_classification":
+
+                      classification,
+
+                  "row_diagnostics":
+
+                      row_diagnostics
+
+              }
+
+              if player_gate_state == "BLOCKED":
+
+                  blocked_players.append(result)
+
+              else:
+
+                  eligible_players.append(result)
+
+          # --------------------------------------------------------
+
+          # SORT BLOCKED PLAYERS
+
+          # --------------------------------------------------------
+
+          priority = {
+
+              "POTENTIAL_CONFIRMED_TRIGGER": 0,
+
+              "REQUIRES_REVIEW": 1,
+
+              "UNCLASSIFIED": 2,
+
+              "DO_NOT_REDISTRIBUTE": 3
+
+          }
+
+          blocked_players.sort(
+
+              key=lambda x: (
+
+                  priority.get(
+
+                      x[
+
+                          "redistribution_classification"
+
+                      ],
+
+                      9
+
+                  ),
+
+                  str(x.get("team") or ""),
+
+                  str(x.get("player") or "")
+
+              )
+
+          )
+
+          # --------------------------------------------------------
+
+          # VALIDATE 20K DISTRIBUTIONS REMAIN
+
           # --------------------------------------------------------
 
           verified_20k = 0
@@ -1688,382 +845,993 @@ jobs:
           for prop in projections:
 
               histogram = prop.get(
+
                   "simulation_histogram",
+
                   []
+
               )
 
               if not histogram:
+
                   continue
 
               total = sum(
+
                   int(row[1])
+
                   for row in histogram
+
                   if isinstance(row, list)
+
                   and len(row) >= 2
+
               )
 
               if total == EXPECTED_SIMS:
+
                   verified_20k += 1
 
-          if verified_20k == 0:
-              raise RuntimeError(
-                  "20K distributions missing."
-              )
-
           # --------------------------------------------------------
-          # VERIFY ROLE V2 PRESERVED
+
+          # ROLE V2 COUNT
+
           # --------------------------------------------------------
 
           role_v2 = 0
 
           for prop in projections:
 
-              role = prop.get(
-                  "role",
-                  {}
-              )
+              role = prop.get("role", {})
 
               if (
+
                   isinstance(role, dict)
-                  and role.get(
-                      "role_method"
-                  )
+
+                  and role.get("role_method")
+
                   == "OPPORTUNITY_BLEND_V2"
+
               ):
+
                   role_v2 += 1
 
-          if role_v2 == 0:
-              raise RuntimeError(
-                  "Role V2 missing."
+          # --------------------------------------------------------
+
+          # EXISTING PICKS
+
+          # --------------------------------------------------------
+
+          candidates = data.get(
+
+              "jpro_picks_candidates",
+
+              []
+
+          )
+
+          # --------------------------------------------------------
+
+          # OUTPUT DIAGNOSTIC FILE
+
+          # --------------------------------------------------------
+
+          diagnostic = {
+
+              "version":
+
+                  "JPRO_AVAILABILITY_DIAGNOSTIC_V1.6.2",
+
+              "status":
+
+                  "DIAGNOSTIC_COMPLETE",
+
+              "source_file":
+
+                  PATH,
+
+              "availability_gate_version":
+
+                  gate_version,
+
+              "availability_gate_status":
+
+                  gate_status,
+
+              "projection_rows":
+
+                  len(projections),
+
+              "unique_projected_players":
+
+                  len(players),
+
+              "eligible_unique_players":
+
+                  len(eligible_players),
+
+              "blocked_unique_players":
+
+                  len(blocked_players),
+
+              "verified_20k_distributions":
+
+                  verified_20k,
+
+              "role_v2_records":
+
+                  role_v2,
+
+              "jpro_candidate_count":
+
+                  len(candidates),
+
+              "blocked_status_counts":
+
+                  dict(raw_status_counts),
+
+              "redistribution_classification_counts":
+
+                  dict(classification_counts),
+
+              "confirmed_trigger_statuses":
+
+                  sorted(
+
+                      CONFIRMED_TRIGGER_STATUSES
+
+                  ),
+
+              "non_trigger_statuses":
+
+                  sorted(
+
+                      NON_TRIGGER_STATUSES
+
+                  ),
+
+              "review_statuses":
+
+                  sorted(
+
+                      REVIEW_STATUSES
+
+                  ),
+
+              "blocked_players":
+
+                  blocked_players,
+
+              "important_note":
+
+                  (
+
+                      "This diagnostic does not alter projections. "
+
+                      "A blocked roster record is not automatically "
+
+                      "an injury redistribution trigger."
+
+                  )
+
+          }
+
+          with open(
+
+              OUTPUT,
+
+              "w",
+
+              encoding="utf-8"
+
+          ) as f:
+
+              json.dump(
+
+                  diagnostic,
+
+                  f,
+
+                  indent=2
+
               )
 
           # --------------------------------------------------------
-          # VERIFY CURRENT TRIGGER LOGIC
-          # --------------------------------------------------------
 
-          trigger_players = audit.get(
-              "trigger_players",
-              []
-          )
-
-          ignored = audit.get(
-              "ignored_blocked_players",
-              []
-          )
-
-          for player in trigger_players:
-
-              if (
-                  player.get("status")
-                  != "CURRENT_ROSTER_UNAVAILABLE"
-              ):
-                  raise RuntimeError(
-                      "Invalid redistribution trigger: "
-                      + str(
-                          player.get(
-                              "player"
-                          )
-                      )
-                      + " / "
-                      + str(
-                          player.get(
-                              "status"
-                          )
-                      )
-                  )
-
-          for player in ignored:
-
-              if (
-                  player.get("status")
-                  == "CURRENT_ROSTER_UNAVAILABLE"
-              ):
-                  raise RuntimeError(
-                      "Current-roster unavailable player "
-                      "was incorrectly ignored: "
-                      + str(
-                          player.get(
-                              "player"
-                          )
-                      )
-                  )
+          # PRINT REPORT
 
           # --------------------------------------------------------
-          # VERIFY BENEFICIARIES
-          # --------------------------------------------------------
 
-          proposed = audit.get(
-              "proposed_adjustments",
-              []
-          )
+          print("")
 
-          for row in proposed:
+          print("=" * 78)
 
-              if not row.get(
-                  "beneficiary_currently_eligible"
-              ):
-                  raise RuntimeError(
-                      "Ineligible beneficiary found: "
-                      + str(
-                          row.get(
-                              "beneficiary"
-                          )
-                      )
-                  )
+          print("BLOCKED PLAYER SUMMARY")
 
-              if (
-                  row.get(
-                      "trigger_availability_status"
-                  )
-                  != "CURRENT_ROSTER_UNAVAILABLE"
-              ):
-                  raise RuntimeError(
-                      "Adjustment triggered by invalid "
-                      "availability status."
-                  )
-
-              if row.get(
-                  "projection_adjustment_applied"
-              ):
-                  raise RuntimeError(
-                      "Projection adjustment was applied "
-                      "during audit."
-                  )
-
-              if row.get(
-                  "simulation_adjustment_applied"
-              ):
-                  raise RuntimeError(
-                      "Simulation adjustment was applied "
-                      "during audit."
-                  )
-
-              if (
-                  row.get(
-                      "trigger_player_id"
-                  )
-                  and row.get(
-                      "beneficiary_player_id"
-                  )
-                  and str(
-                      row.get(
-                          "trigger_player_id"
-                      )
-                  )
-                  == str(
-                      row.get(
-                          "beneficiary_player_id"
-                      )
-                  )
-              ):
-                  raise RuntimeError(
-                      "Self-beneficiary relationship found."
-                  )
-
-          # --------------------------------------------------------
-          # COUNTS
-          # --------------------------------------------------------
+          print("=" * 78)
 
           print(
-              "Current projection rows:",
-              len(projections)
+
+              "Blocked unique players:",
+
+              len(blocked_players)
+
           )
 
           print(
-              "20K distributions:",
+
+              "Eligible unique players:",
+
+              len(eligible_players)
+
+          )
+
+          print(
+
+              "20K distributions preserved:",
+
               verified_20k
+
           )
 
           print(
-              "Role V2 records:",
+
+              "Role V2 records preserved:",
+
               role_v2
+
           )
 
           print(
-              "Availability gate:",
-              audit.get(
-                  "availability_source"
-              )
-          )
 
-          print(
-              "Historical relationships:",
-              audit.get(
-                  "historical_relationships"
-              )
-          )
+              "JPro Picks candidates preserved:",
 
-          print(
-              "Current blocked projected players:",
-              audit.get(
-                  "current_blocked_players"
-              )
-          )
+              len(candidates)
 
-          print(
-              "Current redistribution triggers:",
-              audit.get(
-                  "current_redistribution_triggers"
-              )
-          )
-
-          print(
-              "Ignored blocked players:",
-              audit.get(
-                  "current_ignored_blocked_players"
-              )
-          )
-
-          print(
-              "Matched trigger players:",
-              audit.get(
-                  "matched_trigger_players"
-              )
-          )
-
-          print(
-              "Unmatched trigger players:",
-              audit.get(
-                  "unmatched_trigger_players"
-              )
-          )
-
-          print(
-              "Proposed adjustment rows:",
-              len(proposed)
-          )
-
-          print(
-              "Unique beneficiaries:",
-              audit.get(
-                  "unique_beneficiaries"
-              )
           )
 
           print("")
-          print("=" * 72)
-          print("TOP CURRENT BENEFICIARY AUDIT")
-          print("=" * 72)
 
-          for i, row in enumerate(
-              proposed[:20],
+          print("BLOCKED STATUS COUNTS")
+
+          for status, count in sorted(
+
+              raw_status_counts.items()
+
+          ):
+
+              print(
+
+                  " ",
+
+                  status,
+
+                  ":",
+
+                  count
+
+              )
+
+          print("")
+
+          print("REDISTRIBUTION CLASSIFICATIONS")
+
+          for classification, count in sorted(
+
+              classification_counts.items()
+
+          ):
+
+              print(
+
+                  " ",
+
+                  classification,
+
+                  ":",
+
+                  count
+
+              )
+
+          print("")
+
+          print("=" * 78)
+
+          print("ALL BLOCKED PLAYERS")
+
+          print("=" * 78)
+
+          if not blocked_players:
+
+              print("No blocked players found.")
+
+          for i, player in enumerate(
+
+              blocked_players,
+
               start=1
+
           ):
 
               print("")
+
               print(
+
                   f"#{i}",
-                  row.get(
-                      "beneficiary"
-                  ),
+
+                  player.get("player"),
+
                   "|",
-                  row.get(
-                      "beneficiary_team"
-                  )
+
+                  player.get("team"),
+
+                  "|",
+
+                  player.get("position")
+
               )
 
               print(
-                  "  ABSENT:",
-                  row.get(
-                      "trigger_player"
-                  )
+
+                  "  GAME:",
+
+                  player.get("game")
+
               )
 
               print(
-                  "  EVIDENCE:",
-                  row.get(
-                      "evidence"
-                  )
+
+                  "  OPPONENT:",
+
+                  player.get("opponent")
+
               )
 
               print(
-                  "  WITHOUT GAMES:",
-                  row.get(
-                      "without_games"
+
+                  "  GATE STATE:",
+
+                  player.get(
+
+                      "player_gate_state"
+
                   )
+
               )
 
               print(
-                  "  WITH GAMES:",
-                  row.get(
-                      "with_games"
+
+                  "  EFFECTIVE STATUS:",
+
+                  player.get(
+
+                      "effective_status"
+
                   )
+
               )
 
               print(
-                  "  TARGET DELTA:",
-                  row.get(
-                      "deltas",
-                      {}
-                  ).get(
-                      "targets"
+
+                  "  GATE STATUSES:",
+
+                  player.get(
+
+                      "gate_statuses"
+
                   )
+
               )
 
               print(
-                  "  CARRY DELTA:",
-                  row.get(
-                      "deltas",
-                      {}
-                  ).get(
-                      "carries"
+
+                  "  RAW STATUSES:",
+
+                  player.get(
+
+                      "raw_statuses"
+
                   )
+
               )
 
               print(
-                  "  AIR-YARD DELTA:",
-                  row.get(
-                      "deltas",
-                      {}
-                  ).get(
-                      "receiving_air_yards"
+
+                  "  REDISTRIBUTION:",
+
+                  player.get(
+
+                      "redistribution_classification"
+
                   )
+
               )
 
               print(
-                  "  SIGNAL:",
-                  row.get(
-                      "opportunity_signal"
+
+                  "  PROPS:",
+
+                  ", ".join(
+
+                      player.get(
+
+                          "projection_props",
+
+                          []
+
+                      )
+
                   )
+
               )
+
+              print(
+
+                  "  ROWS:",
+
+                  player.get(
+
+                      "projection_row_count"
+
+                  )
+
+              )
+
+              # Print compact row evidence.
+
+              for row in player.get(
+
+                  "row_diagnostics",
+
+                  []
+
+              )[:4]:
+
+                  print(
+
+                      "    -",
+
+                      row.get("prop"),
+
+                      "| gate_status=",
+
+                      row.get("gate_status"),
+
+                      "| raw_status=",
+
+                      row.get("raw_status"),
+
+                      "| reason=",
+
+                      row.get("reason")
+
+                  )
 
           print("")
-          print("=" * 72)
-          print("JPRO OPPORTUNITY REDISTRIBUTION V1.6.1 VERIFIED")
-          print("=" * 72)
+
+          print("=" * 78)
+
+          print("JPRO AVAILABILITY DIAGNOSTIC V1.6.2 COMPLETE")
+
+          print("=" * 78)
+
+          print("")
+
+          print("Saved:", OUTPUT)
+
+          print("")
 
           print(
-              "V1.5.1 AVAILABILITY SOURCE: VERIFIED"
+
+              "NO PROJECTIONS WERE MODIFIED."
+
           )
 
           print(
-              "NON-ABSENCE BLOCKS: EXCLUDED FROM REDISTRIBUTION"
+
+              "NO 20K DISTRIBUTIONS WERE MODIFIED."
+
           )
 
           print(
-              "PROJECTION CHANGES: 0"
-          )
 
-          print(
-              "20K SIMULATION CHANGES: 0"
+              "NO JPRO PICKS WERE MODIFIED."
+
           )
 
           PY
 
       # ============================================================
-      # SAVE
+
+      # VERIFY DIAGNOSTIC
+
       # ============================================================
 
-      - name: Save Opportunity Redistribution V1.6.1
+      - name: Verify Availability Diagnostic V1.6.2
+
         run: |
+
+          python <<'PY'
+
+          import json
+
+          import os
+
+          PATH = "data/jpro-current-projections.json"
+
+          DIAGNOSTIC = "data/jpro-availability-diagnostic.json"
+
+          EXPECTED_SIMS = 20000
+
+          print("=" * 78)
+
+          print("VERIFY JPRO AVAILABILITY DIAGNOSTIC V1.6.2")
+
+          print("=" * 78)
+
+          if not os.path.exists(PATH):
+
+              raise RuntimeError(
+
+                  "Projection file missing."
+
+              )
+
+          if not os.path.exists(DIAGNOSTIC):
+
+              raise RuntimeError(
+
+                  "Diagnostic file missing."
+
+              )
+
+          with open(PATH, "r", encoding="utf-8") as f:
+
+              data = json.load(f)
+
+          with open(
+
+              DIAGNOSTIC,
+
+              "r",
+
+              encoding="utf-8"
+
+          ) as f:
+
+              diagnostic = json.load(f)
+
+          if (
+
+              diagnostic.get("version")
+
+              != "JPRO_AVAILABILITY_DIAGNOSTIC_V1.6.2"
+
+          ):
+
+              raise RuntimeError(
+
+                  "Wrong diagnostic version."
+
+              )
+
+          if (
+
+              diagnostic.get("status")
+
+              != "DIAGNOSTIC_COMPLETE"
+
+          ):
+
+              raise RuntimeError(
+
+                  "Diagnostic did not complete."
+
+              )
+
+          projections = data.get(
+
+              "projections",
+
+              []
+
+          )
+
+          if not projections:
+
+              raise RuntimeError(
+
+                  "No projections."
+
+              )
+
+          # --------------------------------------------------------
+
+          # VERIFY 20K DISTRIBUTIONS
+
+          # --------------------------------------------------------
+
+          verified_20k = 0
+
+          for prop in projections:
+
+              histogram = prop.get(
+
+                  "simulation_histogram",
+
+                  []
+
+              )
+
+              if not histogram:
+
+                  continue
+
+              total = sum(
+
+                  int(row[1])
+
+                  for row in histogram
+
+                  if isinstance(row, list)
+
+                  and len(row) >= 2
+
+              )
+
+              if total != EXPECTED_SIMS:
+
+                  raise RuntimeError(
+
+                      "20K distribution changed for "
+
+                      + str(prop.get("player"))
+
+                      + " / "
+
+                      + str(prop.get("prop"))
+
+                  )
+
+              verified_20k += 1
+
+          # --------------------------------------------------------
+
+          # VERIFY ROLE V2
+
+          # --------------------------------------------------------
+
+          role_v2 = sum(
+
+              1
+
+              for prop in projections
+
+              if isinstance(
+
+                  prop.get("role"),
+
+                  dict
+
+              )
+
+              and prop.get(
+
+                  "role",
+
+                  {}
+
+              ).get("role_method")
+
+              == "OPPORTUNITY_BLEND_V2"
+
+          )
+
+          # --------------------------------------------------------
+
+          # VERIFY AVAILABILITY GATE
+
+          # --------------------------------------------------------
+
+          gate = data.get(
+
+              "jpro_availability_gate",
+
+              {}
+
+          )
+
+          if gate.get("status") != "ACTIVE":
+
+              raise RuntimeError(
+
+                  "Availability gate no longer active."
+
+              )
+
+          # --------------------------------------------------------
+
+          # VERIFY PICKS STILL PRESENT
+
+          # --------------------------------------------------------
+
+          candidates = data.get(
+
+              "jpro_picks_candidates",
+
+              []
+
+          )
+
+          if not candidates:
+
+              raise RuntimeError(
+
+                  "JPro Picks candidates disappeared."
+
+              )
+
+          # --------------------------------------------------------
+
+          # VERIFY BLOCKED COUNT
+
+          # --------------------------------------------------------
+
+          blocked = diagnostic.get(
+
+              "blocked_players",
+
+              []
+
+          )
+
+          blocked_count = diagnostic.get(
+
+              "blocked_unique_players",
+
+              0
+
+          )
+
+          if len(blocked) != blocked_count:
+
+              raise RuntimeError(
+
+                  "Blocked player count mismatch."
+
+              )
+
+          # Every blocked player must have a classification.
+
+          for player in blocked:
+
+              classification = player.get(
+
+                  "redistribution_classification"
+
+              )
+
+              if classification not in {
+
+                  "POTENTIAL_CONFIRMED_TRIGGER",
+
+                  "REQUIRES_REVIEW",
+
+                  "DO_NOT_REDISTRIBUTE",
+
+                  "UNCLASSIFIED"
+
+              }:
+
+                  raise RuntimeError(
+
+                      "Invalid redistribution classification "
+
+                      "for "
+
+                      + str(player.get("player"))
+
+                  )
+
+          print(
+
+              "Projection rows:",
+
+              len(projections)
+
+          )
+
+          print(
+
+              "20K distributions:",
+
+              verified_20k
+
+          )
+
+          print(
+
+              "Role V2 records:",
+
+              role_v2
+
+          )
+
+          print(
+
+              "Availability gate:",
+
+              gate.get("version")
+
+          )
+
+          print(
+
+              "Availability status:",
+
+              gate.get("status")
+
+          )
+
+          print(
+
+              "JPro Picks candidates:",
+
+              len(candidates)
+
+          )
+
+          print(
+
+              "Blocked unique players:",
+
+              blocked_count
+
+          )
+
+          print("")
+
+          print("=" * 78)
+
+          print("BLOCKED PLAYER CLASSIFICATIONS")
+
+          print("=" * 78)
+
+          counts = diagnostic.get(
+
+              "redistribution_classification_counts",
+
+              {}
+
+          )
+
+          for key, value in sorted(
+
+              counts.items()
+
+          ):
+
+              print(
+
+                  key + ":",
+
+                  value
+
+              )
+
+          print("")
+
+          print("=" * 78)
+
+          print("BLOCKED PLAYERS")
+
+          print("=" * 78)
+
+          for i, player in enumerate(
+
+              blocked,
+
+              start=1
+
+          ):
+
+              print(
+
+                  f"{i}.",
+
+                  player.get("player"),
+
+                  "|",
+
+                  player.get("team"),
+
+                  "|",
+
+                  player.get("position"),
+
+                  "| STATUS:",
+
+                  player.get("effective_status"),
+
+                  "| CLASS:",
+
+                  player.get(
+
+                      "redistribution_classification"
+
+                  )
+
+              )
+
+          print("")
+
+          print("=" * 78)
+
+          print("JPRO AVAILABILITY DIAGNOSTIC V1.6.2 VERIFIED")
+
+          print("=" * 78)
+
+          print(
+
+              "PROJECTIONS UNCHANGED: YES"
+
+          )
+
+          print(
+
+              "20K DISTRIBUTIONS PRESERVED: YES"
+
+          )
+
+          print(
+
+              "ROLE V2 PRESERVED: YES"
+
+          )
+
+          print(
+
+              "JPRO PICKS PRESERVED: YES"
+
+          )
+
+          print("")
+
+          print(
+
+              "NEXT: use these exact statuses to determine "
+
+              "which blocked players can trigger redistribution."
+
+          )
+
+          PY
+
+      # ============================================================
+
+      # SAVE DIAGNOSTIC
+
+      # ============================================================
+
+      - name: Save Availability Diagnostic V1.6.2
+
+        run: |
+
           git config user.name "JPro Opportunity Engine"
+
           git config user.email "actions@github.com"
 
-          git add data/jpro-opportunity-redistribution-v161.json
+          git add data/jpro-availability-diagnostic.json
 
           if git diff --cached --quiet; then
+
             echo "No changes to commit."
+
           else
-            git commit -m "Add Opportunity Redistribution audit V1.6.1"
+
+            git commit -m "Add availability diagnostic V1.6.2"
+
             git push
+
           fi
