@@ -1,0 +1,2069 @@
+name: JPro Opportunity Redistribution V1.6.1
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  opportunity-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get JPro
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Opportunity Engine V1.6.1
+        run: |
+          pip install nflreadpy polars pyarrow
+
+      # ============================================================
+      # JPRO OPPORTUNITY REDISTRIBUTION V1.6.1
+      #
+      # PURPOSE
+      #
+      # Fixes the V1.6 current-absence bridge.
+      #
+      # V1.6 incorrectly produced a broad "unavailable" population.
+      # V1.6.1 uses the V1.5.1 projection availability gate as the
+      # authoritative source for CURRENT meaningful absences.
+      #
+      # IMPORTANT
+      #
+      # This remains AUDIT ONLY.
+      #
+      # It DOES NOT:
+      # - change projections
+      # - change 20K simulations
+      # - change JPro Picks
+      # - transfer yards from one player to another
+      #
+      # It identifies historical teammate redistribution evidence
+      # that could later be used by the projection engine.
+      # ============================================================
+
+      - name: Build Opportunity Redistribution Audit V1.6.1
+        run: |
+          python <<'PY'
+          import json
+          import math
+          import os
+          from collections import defaultdict
+
+          CURRENT_PATH = "data/jpro-current-projections.json"
+          HISTORY_PATH = "data/jpro-opportunity-redistribution.json"
+          OUTPUT_PATH = "data/jpro-opportunity-redistribution-v161.json"
+
+          EXPECTED_SIMS = 20000
+
+          print("=" * 72)
+          print("JPRO OPPORTUNITY REDISTRIBUTION V1.6.1")
+          print("=" * 72)
+
+          # ========================================================
+          # HELPERS
+          # ========================================================
+
+          def num(value, default=0.0):
+              try:
+                  value = float(value)
+
+                  if math.isnan(value) or math.isinf(value):
+                      return default
+
+                  return value
+
+              except Exception:
+                  return default
+
+
+          def normalize(value):
+              if value is None:
+                  return ""
+
+              return str(value).strip().upper()
+
+
+          def player_key(player_id, player_name):
+              if player_id:
+                  return str(player_id)
+
+              return normalize(player_name)
+
+
+          # ========================================================
+          # LOAD CURRENT JPRO PROJECTIONS
+          # ========================================================
+
+          if not os.path.exists(CURRENT_PATH):
+              raise RuntimeError(
+                  f"Missing current projection file: {CURRENT_PATH}"
+              )
+
+          with open(
+              CURRENT_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              current = json.load(f)
+
+          projections = current.get(
+              "projections",
+              []
+          )
+
+          if not projections:
+              raise RuntimeError(
+                  "No current projections found."
+              )
+
+          print(
+              "Current projection rows:",
+              len(projections)
+          )
+
+          # ========================================================
+          # REQUIRE AVAILABILITY V1.5.1
+          # ========================================================
+
+          gate = current.get(
+              "jpro_availability_gate",
+              {}
+          )
+
+          gate_version = normalize(
+              gate.get("version")
+          )
+
+          gate_status = normalize(
+              gate.get("status")
+          )
+
+          if gate_version != "JPRO_AVAILABILITY_GATE_V1.5.1":
+              raise RuntimeError(
+                  "Opportunity V1.6.1 requires "
+                  "JPRO_AVAILABILITY_GATE_V1.5.1. "
+                  f"Found: {gate_version}"
+              )
+
+          if gate_status != "ACTIVE":
+              raise RuntimeError(
+                  "Availability V1.5.1 is not ACTIVE."
+              )
+
+          print(
+              "Availability gate:",
+              gate_version
+          )
+
+          print(
+              "Availability status:",
+              gate_status
+          )
+
+          # ========================================================
+          # VERIFY CORE MODEL IS STILL INTACT
+          # ========================================================
+
+          distributions_20k = 0
+          role_v2_records = 0
+
+          for prop in projections:
+
+              histogram = prop.get(
+                  "simulation_histogram",
+                  []
+              )
+
+              if histogram:
+                  total = sum(
+                      int(row[1])
+                      for row in histogram
+                      if isinstance(row, list)
+                      and len(row) >= 2
+                  )
+
+                  if total == EXPECTED_SIMS:
+                      distributions_20k += 1
+
+              role = prop.get(
+                  "role",
+                  {}
+              )
+
+              if (
+                  isinstance(role, dict)
+                  and role.get("role_method")
+                  == "OPPORTUNITY_BLEND_V2"
+              ):
+                  role_v2_records += 1
+
+          if distributions_20k == 0:
+              raise RuntimeError(
+                  "20K distributions are missing."
+              )
+
+          if role_v2_records == 0:
+              raise RuntimeError(
+                  "Role V2 records are missing."
+              )
+
+          # ========================================================
+          # READ V1.5.1 AVAILABILITY
+          #
+          # V1.5.1 may store normalized metadata in:
+          #
+          # jpro_availability_v151
+          #
+          # or retain V1.5 compatibility metadata:
+          #
+          # jpro_availability_v15
+          #
+          # We fail closed if neither exists.
+          # ========================================================
+
+          def read_current_availability(prop):
+
+              candidates = [
+                  prop.get(
+                      "jpro_availability_v151"
+                  ),
+                  prop.get(
+                      "jpro_availability_v15"
+                  )
+              ]
+
+              availability = None
+
+              for candidate in candidates:
+                  if isinstance(candidate, dict):
+                      availability = candidate
+                      break
+
+              if availability is None:
+                  raise RuntimeError(
+                      "Projection is missing V1.5.1 "
+                      "availability metadata: "
+                      + str(prop.get("player"))
+                      + " / "
+                      + str(prop.get("prop"))
+                  )
+
+              eligible = availability.get(
+                  "eligible"
+              )
+
+              status = normalize(
+                  availability.get("status")
+              )
+
+              if not isinstance(
+                  eligible,
+                  bool
+              ):
+                  raise RuntimeError(
+                      "Projection has invalid availability "
+                      "eligibility value: "
+                      + str(prop.get("player"))
+                      + " / "
+                      + str(prop.get("prop"))
+                  )
+
+              if not status:
+                  raise RuntimeError(
+                      "Projection has no normalized "
+                      "availability status: "
+                      + str(prop.get("player"))
+                  )
+
+              return eligible, status
+
+
+          # ========================================================
+          # BUILD UNIQUE CURRENT PLAYER MAP
+          # ========================================================
+
+          current_players = {}
+
+          for prop in projections:
+
+              eligible, status = (
+                  read_current_availability(
+                      prop
+                  )
+              )
+
+              pid = prop.get(
+                  "player_id"
+              )
+
+              pname = prop.get(
+                  "player"
+              )
+
+              key = player_key(
+                  pid,
+                  pname
+              )
+
+              if not key:
+                  continue
+
+              record = current_players.get(
+                  key
+              )
+
+              if record is None:
+                  current_players[key] = {
+                      "player_id": pid,
+                      "player": pname,
+                      "team": prop.get("team"),
+                      "opponent": prop.get(
+                          "opponent"
+                      ),
+                      "position": normalize(
+                          prop.get("position")
+                      ),
+                      "eligible": eligible,
+                      "status": status,
+                      "projection_rows": 1
+                  }
+
+              else:
+                  record[
+                      "projection_rows"
+                  ] += 1
+
+                  # All props for one player should agree.
+                  if (
+                      record["eligible"]
+                      != eligible
+                  ):
+                      raise RuntimeError(
+                          "Availability disagreement across "
+                          "projection rows for "
+                          + str(pname)
+                      )
+
+                  if (
+                      record["status"]
+                      != status
+                  ):
+                      raise RuntimeError(
+                          "Availability status disagreement "
+                          "across projection rows for "
+                          + str(pname)
+                      )
+
+          print(
+              "Unique projected players:",
+              len(current_players)
+          )
+
+          # ========================================================
+          # CLASSIFY BLOCKED PLAYERS
+          #
+          # CRITICAL:
+          #
+          # Not every blocked player should trigger redistribution.
+          #
+          # CURRENT_ROSTER_UNAVAILABLE:
+          #     YES -> can trigger redistribution audit.
+          #
+          # DEVELOPMENT_PLAYER:
+          #     NO -> blocked from Picks but does not trigger.
+          #
+          # CURRENT_PLAYER_TEAM_MISMATCH:
+          #     NO -> stale team mapping; does not trigger.
+          # ========================================================
+
+          REDISTRIBUTION_TRIGGER_STATUSES = {
+              "CURRENT_ROSTER_UNAVAILABLE"
+          }
+
+          NON_TRIGGER_BLOCKED_STATUSES = {
+              "DEVELOPMENT_PLAYER",
+              "CURRENT_PLAYER_TEAM_MISMATCH"
+          }
+
+          eligible_players = []
+          blocked_players = []
+          trigger_players = []
+          ignored_blocked_players = []
+
+          for player in current_players.values():
+
+              if player["eligible"]:
+                  eligible_players.append(
+                      player
+                  )
+                  continue
+
+              blocked_players.append(
+                  player
+              )
+
+              status = player[
+                  "status"
+              ]
+
+              if (
+                  status
+                  in REDISTRIBUTION_TRIGGER_STATUSES
+              ):
+                  trigger_players.append(
+                      player
+                  )
+
+              elif (
+                  status
+                  in NON_TRIGGER_BLOCKED_STATUSES
+              ):
+                  ignored_blocked_players.append(
+                      player
+                  )
+
+              else:
+                  # Unknown blocked statuses must not
+                  # silently trigger redistribution.
+                  ignored_blocked_players.append(
+                      player
+                  )
+
+          print("")
+          print("=" * 72)
+          print("CURRENT AVAILABILITY BRIDGE")
+          print("=" * 72)
+
+          print(
+              "Eligible projected players:",
+              len(eligible_players)
+          )
+
+          print(
+              "Blocked projected players:",
+              len(blocked_players)
+          )
+
+          print(
+              "Redistribution trigger players:",
+              len(trigger_players)
+          )
+
+          print(
+              "Ignored blocked players:",
+              len(ignored_blocked_players)
+          )
+
+          print("")
+          print("REDISTRIBUTION TRIGGERS")
+
+          for player in sorted(
+              trigger_players,
+              key=lambda x: (
+                  str(x.get("team")),
+                  str(x.get("player"))
+              )
+          ):
+              print(
+                  " ",
+                  player.get("player"),
+                  "|",
+                  player.get("team"),
+                  "|",
+                  player.get("position"),
+                  "|",
+                  player.get("status")
+              )
+
+          print("")
+          print("BLOCKED BUT NOT REDISTRIBUTION TRIGGERS")
+
+          for player in sorted(
+              ignored_blocked_players,
+              key=lambda x: (
+                  str(x.get("team")),
+                  str(x.get("player"))
+              )
+          ):
+              print(
+                  " ",
+                  player.get("player"),
+                  "|",
+                  player.get("team"),
+                  "|",
+                  player.get("position"),
+                  "|",
+                  player.get("status")
+              )
+
+          # ========================================================
+          # LOAD HISTORICAL RELATIONSHIPS FROM V1.6
+          # ========================================================
+
+          if not os.path.exists(
+              HISTORY_PATH
+          ):
+              raise RuntimeError(
+                  "Missing V1.6 opportunity relationship file: "
+                  + HISTORY_PATH
+              )
+
+          with open(
+              HISTORY_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              history = json.load(f)
+
+          # Support several possible names without
+          # silently accepting unrelated structures.
+          relationship_keys = [
+              "relationships",
+              "historical_relationships",
+              "redistribution_relationships",
+              "teammate_relationships"
+          ]
+
+          relationships = None
+          relationship_source_key = None
+
+          for key in relationship_keys:
+              value = history.get(key)
+
+              if (
+                  isinstance(value, list)
+                  and len(value) > 0
+              ):
+                  relationships = value
+                  relationship_source_key = key
+                  break
+
+          if relationships is None:
+
+              # Some V1.6 outputs may store the rows
+              # inside an audit object.
+              audit = history.get(
+                  "audit",
+                  {}
+              )
+
+              if isinstance(audit, dict):
+
+                  for key in relationship_keys:
+                      value = audit.get(key)
+
+                      if (
+                          isinstance(value, list)
+                          and len(value) > 0
+                      ):
+                          relationships = value
+                          relationship_source_key = (
+                              "audit." + key
+                          )
+                          break
+
+          if relationships is None:
+              raise RuntimeError(
+                  "Could not locate historical relationship "
+                  "rows in V1.6 output."
+              )
+
+          print("")
+          print(
+              "Historical relationship source:",
+              relationship_source_key
+          )
+
+          print(
+              "Historical relationships:",
+              len(relationships)
+          )
+
+          # ========================================================
+          # FLEXIBLE HISTORICAL FIELD READER
+          # ========================================================
+
+          def first_value(
+              row,
+              keys,
+              default=None
+          ):
+              for key in keys:
+                  if (
+                      key in row
+                      and row.get(key) is not None
+                  ):
+                      return row.get(key)
+
+              return default
+
+
+          def relationship_trigger_id(row):
+              return first_value(
+                  row,
+                  [
+                      "trigger_player_id",
+                      "absent_player_id",
+                      "missing_player_id",
+                      "player_out_id"
+                  ]
+              )
+
+
+          def relationship_trigger_name(row):
+              return first_value(
+                  row,
+                  [
+                      "trigger_player",
+                      "trigger_player_name",
+                      "absent_player",
+                      "absent_player_name",
+                      "missing_player",
+                      "missing_player_name",
+                      "player_out",
+                      "player_out_name"
+                  ]
+              )
+
+
+          def relationship_beneficiary_id(row):
+              return first_value(
+                  row,
+                  [
+                      "beneficiary_player_id",
+                      "teammate_player_id",
+                      "player_id"
+                  ]
+              )
+
+
+          def relationship_beneficiary_name(row):
+              return first_value(
+                  row,
+                  [
+                      "beneficiary",
+                      "beneficiary_player",
+                      "beneficiary_player_name",
+                      "teammate",
+                      "teammate_name",
+                      "player",
+                      "player_name"
+                  ]
+              )
+
+
+          def relationship_team(row):
+              return first_value(
+                  row,
+                  [
+                      "team",
+                      "recent_team"
+                  ]
+              )
+
+
+          def relationship_evidence(row):
+              return normalize(
+                  first_value(
+                      row,
+                      [
+                          "evidence",
+                          "evidence_label",
+                          "sample_quality",
+                          "confidence"
+                      ],
+                      "LIMITED_SAMPLE"
+                  )
+              )
+
+
+          def relationship_without_games(row):
+              return int(
+                  num(
+                      first_value(
+                          row,
+                          [
+                              "without_games",
+                              "games_without",
+                              "absent_games",
+                              "trigger_missing_games"
+                          ],
+                          0
+                      ),
+                      0
+                  )
+              )
+
+
+          def relationship_with_games(row):
+              return int(
+                  num(
+                      first_value(
+                          row,
+                          [
+                              "with_games",
+                              "games_with",
+                              "present_games",
+                              "trigger_present_games"
+                          ],
+                          0
+                      ),
+                      0
+                  )
+              )
+
+
+          def metric_delta(
+              row,
+              metric
+          ):
+              direct_keys = {
+                  "targets": [
+                      "targets_delta",
+                      "delta_targets",
+                      "target_delta"
+                  ],
+                  "carries": [
+                      "carries_delta",
+                      "delta_carries",
+                      "carry_delta"
+                  ],
+                  "receiving_air_yards": [
+                      "receiving_air_yards_delta",
+                      "air_yards_delta",
+                      "delta_air_yards"
+                  ],
+                  "receptions": [
+                      "receptions_delta",
+                      "delta_receptions"
+                  ],
+                  "receiving_yards": [
+                      "receiving_yards_delta",
+                      "delta_receiving_yards"
+                  ],
+                  "rushing_yards": [
+                      "rushing_yards_delta",
+                      "delta_rushing_yards"
+                  ],
+                  "attempts": [
+                      "attempts_delta",
+                      "delta_attempts"
+                  ]
+              }
+
+              value = first_value(
+                  row,
+                  direct_keys.get(
+                      metric,
+                      []
+                  )
+              )
+
+              if value is not None:
+                  return num(value)
+
+              without_keys = [
+                  f"{metric}_without",
+                  f"without_{metric}",
+                  f"{metric}_avg_without"
+              ]
+
+              with_keys = [
+                  f"{metric}_with",
+                  f"with_{metric}",
+                  f"{metric}_avg_with"
+              ]
+
+              without_value = first_value(
+                  row,
+                  without_keys
+              )
+
+              with_value = first_value(
+                  row,
+                  with_keys
+              )
+
+              if (
+                  without_value is not None
+                  and with_value is not None
+              ):
+                  return (
+                      num(without_value)
+                      - num(with_value)
+                  )
+
+              return 0.0
+
+
+          # ========================================================
+          # CURRENT ELIGIBLE LOOKUP
+          # ========================================================
+
+          eligible_by_id = {}
+          eligible_by_name_team = {}
+
+          for player in eligible_players:
+
+              pid = player.get(
+                  "player_id"
+              )
+
+              if pid:
+                  eligible_by_id[
+                      str(pid)
+                  ] = player
+
+              name_team_key = (
+                  normalize(
+                      player.get("player")
+                  ),
+                  normalize(
+                      player.get("team")
+                  )
+              )
+
+              eligible_by_name_team[
+                  name_team_key
+              ] = player
+
+          # ========================================================
+          # MATCH CURRENT ABSENCES TO HISTORICAL RELATIONSHIPS
+          # ========================================================
+
+          proposed = []
+
+          matched_trigger_players = set()
+          unmatched_trigger_players = []
+
+          for trigger in trigger_players:
+
+              trigger_id = (
+                  str(trigger.get("player_id"))
+                  if trigger.get("player_id")
+                  else None
+              )
+
+              trigger_name = normalize(
+                  trigger.get("player")
+              )
+
+              trigger_team = normalize(
+                  trigger.get("team")
+              )
+
+              trigger_matches = []
+
+              for row in relationships:
+
+                  if not isinstance(
+                      row,
+                      dict
+                  ):
+                      continue
+
+                  hist_trigger_id = (
+                      relationship_trigger_id(
+                          row
+                      )
+                  )
+
+                  hist_trigger_name = normalize(
+                      relationship_trigger_name(
+                          row
+                      )
+                  )
+
+                  hist_team = normalize(
+                      relationship_team(
+                          row
+                      )
+                  )
+
+                  id_match = (
+                      trigger_id
+                      and hist_trigger_id
+                      and str(hist_trigger_id)
+                      == trigger_id
+                  )
+
+                  name_match = (
+                      trigger_name
+                      and hist_trigger_name
+                      and hist_trigger_name
+                      == trigger_name
+                  )
+
+                  team_match = (
+                      not hist_team
+                      or not trigger_team
+                      or hist_team
+                      == trigger_team
+                  )
+
+                  if (
+                      (id_match or name_match)
+                      and team_match
+                  ):
+                      trigger_matches.append(
+                          row
+                      )
+
+              if not trigger_matches:
+                  unmatched_trigger_players.append(
+                      trigger
+                  )
+                  continue
+
+              matched_trigger_players.add(
+                  player_key(
+                      trigger.get("player_id"),
+                      trigger.get("player")
+                  )
+              )
+
+              for row in trigger_matches:
+
+                  beneficiary_id = (
+                      relationship_beneficiary_id(
+                          row
+                      )
+                  )
+
+                  beneficiary_name = normalize(
+                      relationship_beneficiary_name(
+                          row
+                      )
+                  )
+
+                  beneficiary = None
+
+                  if beneficiary_id is not None:
+                      beneficiary = (
+                          eligible_by_id.get(
+                              str(
+                                  beneficiary_id
+                              )
+                          )
+                      )
+
+                  if (
+                      beneficiary is None
+                      and beneficiary_name
+                  ):
+                      beneficiary = (
+                          eligible_by_name_team.get(
+                              (
+                                  beneficiary_name,
+                                  trigger_team
+                              )
+                          )
+                      )
+
+                  # Beneficiary must currently be eligible.
+                  if beneficiary is None:
+                      continue
+
+                  # Never redistribute back to same player.
+                  if (
+                      player_key(
+                          beneficiary.get(
+                              "player_id"
+                          ),
+                          beneficiary.get(
+                              "player"
+                          )
+                      )
+                      ==
+                      player_key(
+                          trigger.get(
+                              "player_id"
+                          ),
+                          trigger.get(
+                              "player"
+                          )
+                      )
+                  ):
+                      continue
+
+                  evidence = (
+                      relationship_evidence(
+                          row
+                      )
+                  )
+
+                  without_games = (
+                      relationship_without_games(
+                          row
+                      )
+                  )
+
+                  with_games = (
+                      relationship_with_games(
+                          row
+                      )
+                  )
+
+                  deltas = {
+                      "targets":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "targets"
+                              ),
+                              3
+                          ),
+
+                      "carries":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "carries"
+                              ),
+                              3
+                          ),
+
+                      "receiving_air_yards":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "receiving_air_yards"
+                              ),
+                              3
+                          ),
+
+                      "receptions":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "receptions"
+                              ),
+                              3
+                          ),
+
+                      "receiving_yards":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "receiving_yards"
+                              ),
+                              3
+                          ),
+
+                      "rushing_yards":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "rushing_yards"
+                              ),
+                              3
+                          ),
+
+                      "attempts":
+                          round(
+                              metric_delta(
+                                  row,
+                                  "attempts"
+                              ),
+                              3
+                          )
+                  }
+
+                  # Opportunity signal is ONLY a ranking score.
+                  # It is NOT a projection adjustment.
+                  opportunity_signal = (
+                      max(
+                          deltas["targets"],
+                          0
+                      ) * 10
+                      +
+                      max(
+                          deltas["carries"],
+                          0
+                      ) * 5
+                      +
+                      max(
+                          deltas[
+                              "receiving_air_yards"
+                          ],
+                          0
+                      ) * 0.08
+                  )
+
+                  proposed.append({
+                      "trigger_player_id":
+                          trigger.get(
+                              "player_id"
+                          ),
+
+                      "trigger_player":
+                          trigger.get(
+                              "player"
+                          ),
+
+                      "trigger_team":
+                          trigger.get(
+                              "team"
+                          ),
+
+                      "trigger_position":
+                          trigger.get(
+                              "position"
+                          ),
+
+                      "trigger_availability_status":
+                          trigger.get(
+                              "status"
+                          ),
+
+                      "beneficiary_player_id":
+                          beneficiary.get(
+                              "player_id"
+                          ),
+
+                      "beneficiary":
+                          beneficiary.get(
+                              "player"
+                          ),
+
+                      "beneficiary_team":
+                          beneficiary.get(
+                              "team"
+                          ),
+
+                      "beneficiary_position":
+                          beneficiary.get(
+                              "position"
+                          ),
+
+                      "beneficiary_currently_eligible":
+                          True,
+
+                      "evidence":
+                          evidence,
+
+                      "without_games":
+                          without_games,
+
+                      "with_games":
+                          with_games,
+
+                      "deltas":
+                          deltas,
+
+                      "opportunity_signal":
+                          round(
+                              opportunity_signal,
+                              3
+                          ),
+
+                      "projection_adjustment_applied":
+                          False,
+
+                      "simulation_adjustment_applied":
+                          False,
+
+                      "audit_only":
+                          True
+                  })
+
+          # ========================================================
+          # DEDUPLICATE
+          # ========================================================
+
+          deduped = {}
+
+          for row in proposed:
+
+              key = (
+                  str(
+                      row.get(
+                          "trigger_player_id"
+                      )
+                      or row.get(
+                          "trigger_player"
+                      )
+                  ),
+                  str(
+                      row.get(
+                          "beneficiary_player_id"
+                      )
+                      or row.get(
+                          "beneficiary"
+                      )
+                  )
+              )
+
+              existing = deduped.get(
+                  key
+              )
+
+              if existing is None:
+                  deduped[key] = row
+
+              else:
+                  # Prefer stronger sample evidence.
+                  evidence_rank = {
+                      "STRONG_SAMPLE": 3,
+                      "MODERATE_SAMPLE": 2,
+                      "LIMITED_SAMPLE": 1
+                  }
+
+                  old_rank = evidence_rank.get(
+                      existing.get(
+                          "evidence"
+                      ),
+                      0
+                  )
+
+                  new_rank = evidence_rank.get(
+                      row.get(
+                          "evidence"
+                      ),
+                      0
+                  )
+
+                  if (
+                      new_rank > old_rank
+                      or (
+                          new_rank == old_rank
+                          and row.get(
+                              "opportunity_signal",
+                              0
+                          )
+                          >
+                          existing.get(
+                              "opportunity_signal",
+                              0
+                          )
+                      )
+                  ):
+                      deduped[key] = row
+
+          proposed = list(
+              deduped.values()
+          )
+
+          # ========================================================
+          # SORT
+          # ========================================================
+
+          evidence_rank = {
+              "STRONG_SAMPLE": 3,
+              "MODERATE_SAMPLE": 2,
+              "LIMITED_SAMPLE": 1
+          }
+
+          proposed.sort(
+              key=lambda x: (
+                  evidence_rank.get(
+                      x.get("evidence"),
+                      0
+                  ),
+                  x.get(
+                      "opportunity_signal",
+                      0
+                  ),
+                  x.get(
+                      "without_games",
+                      0
+                  )
+              ),
+              reverse=True
+          )
+
+          unique_beneficiaries = {
+              player_key(
+                  row.get(
+                      "beneficiary_player_id"
+                  ),
+                  row.get(
+                      "beneficiary"
+                  )
+              )
+              for row in proposed
+          }
+
+          # ========================================================
+          # SUMMARY
+          # ========================================================
+
+          evidence_counts = defaultdict(
+              int
+          )
+
+          for row in proposed:
+              evidence_counts[
+                  row.get(
+                      "evidence",
+                      "UNKNOWN"
+                  )
+              ] += 1
+
+          output = {
+              "version":
+                  "JPRO_OPPORTUNITY_REDISTRIBUTION_V1.6.1",
+
+              "status":
+                  "AUDIT_READY",
+
+              "mode":
+                  "AUDIT_ONLY",
+
+              "availability_source":
+                  "JPRO_AVAILABILITY_GATE_V1.5.1",
+
+              "historical_relationship_source":
+                  relationship_source_key,
+
+              "current_projection_rows":
+                  len(projections),
+
+              "current_unique_projected_players":
+                  len(current_players),
+
+              "current_eligible_players":
+                  len(eligible_players),
+
+              "current_blocked_players":
+                  len(blocked_players),
+
+              "current_redistribution_triggers":
+                  len(trigger_players),
+
+              "current_ignored_blocked_players":
+                  len(ignored_blocked_players),
+
+              "historical_relationships":
+                  len(relationships),
+
+              "matched_trigger_players":
+                  len(matched_trigger_players),
+
+              "unmatched_trigger_players":
+                  len(unmatched_trigger_players),
+
+              "proposed_adjustment_rows":
+                  len(proposed),
+
+              "unique_beneficiaries":
+                  len(unique_beneficiaries),
+
+              "evidence_counts":
+                  dict(evidence_counts),
+
+              "trigger_players":
+                  trigger_players,
+
+              "ignored_blocked_players":
+                  ignored_blocked_players,
+
+              "unmatched_trigger_players_detail":
+                  unmatched_trigger_players,
+
+              "proposed_adjustments":
+                  proposed,
+
+              "projection_changes_applied":
+                  False,
+
+              "simulation_changes_applied":
+                  False,
+
+              "limitations": [
+                  (
+                      "Historical teammate splits are descriptive "
+                      "and are not assumed to be causal."
+                  ),
+                  (
+                      "Only CURRENT_ROSTER_UNAVAILABLE currently "
+                      "triggers redistribution."
+                  ),
+                  (
+                      "Development players and team mismatches "
+                      "remain blocked from Picks but do not trigger "
+                      "redistribution."
+                  ),
+                  (
+                      "No projection or 20K simulation is changed "
+                      "by V1.6.1."
+                  ),
+                  (
+                      "A later validated layer must determine how "
+                      "historical opportunity deltas should affect "
+                      "future workload distributions."
+                  )
+              ]
+          }
+
+          with open(
+              OUTPUT_PATH,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  output,
+                  f,
+                  separators=(",", ":")
+              )
+
+          # ========================================================
+          # CONSOLE AUDIT
+          # ========================================================
+
+          print("")
+          print("=" * 72)
+          print("V1.6.1 CURRENT ABSENCE BRIDGE COMPLETE")
+          print("=" * 72)
+
+          print(
+              "Current projection rows:",
+              len(projections)
+          )
+
+          print(
+              "20K distributions:",
+              distributions_20k
+          )
+
+          print(
+              "Role V2 records:",
+              role_v2_records
+          )
+
+          print(
+              "Current blocked players:",
+              len(blocked_players)
+          )
+
+          print(
+              "Current redistribution triggers:",
+              len(trigger_players)
+          )
+
+          print(
+              "Ignored blocked players:",
+              len(ignored_blocked_players)
+          )
+
+          print(
+              "Historical relationships:",
+              len(relationships)
+          )
+
+          print(
+              "Matched trigger players:",
+              len(matched_trigger_players)
+          )
+
+          print(
+              "Unmatched trigger players:",
+              len(unmatched_trigger_players)
+          )
+
+          print(
+              "Proposed adjustment rows:",
+              len(proposed)
+          )
+
+          print(
+              "Unique beneficiaries:",
+              len(unique_beneficiaries)
+          )
+
+          print("")
+          print("=" * 72)
+          print("TOP CURRENT BENEFICIARY AUDIT")
+          print("=" * 72)
+
+          for i, row in enumerate(
+              proposed[:30],
+              start=1
+          ):
+
+              print("")
+              print(
+                  f"#{i}",
+                  row.get(
+                      "beneficiary"
+                  ),
+                  "|",
+                  row.get(
+                      "beneficiary_team"
+                  ),
+                  "|",
+                  row.get(
+                      "beneficiary_position"
+                  )
+              )
+
+              print(
+                  "  ABSENT:",
+                  row.get(
+                      "trigger_player"
+                  )
+              )
+
+              print(
+                  "  STATUS:",
+                  row.get(
+                      "trigger_availability_status"
+                  )
+              )
+
+              print(
+                  "  EVIDENCE:",
+                  row.get(
+                      "evidence"
+                  )
+              )
+
+              print(
+                  "  GAMES WITHOUT:",
+                  row.get(
+                      "without_games"
+                  )
+              )
+
+              print(
+                  "  GAMES WITH:",
+                  row.get(
+                      "with_games"
+                  )
+              )
+
+              print(
+                  "  TARGET DELTA:",
+                  row.get(
+                      "deltas",
+                      {}
+                  ).get(
+                      "targets"
+                  )
+              )
+
+              print(
+                  "  CARRY DELTA:",
+                  row.get(
+                      "deltas",
+                      {}
+                  ).get(
+                      "carries"
+                  )
+              )
+
+              print(
+                  "  AIR-YARD DELTA:",
+                  row.get(
+                      "deltas",
+                      {}
+                  ).get(
+                      "receiving_air_yards"
+                  )
+              )
+
+              print(
+                  "  OPPORTUNITY SIGNAL:",
+                  row.get(
+                      "opportunity_signal"
+                  )
+              )
+
+          print("")
+          print("Saved:", OUTPUT_PATH)
+
+          PY
+
+      # ============================================================
+      # VERIFY V1.6.1
+      # ============================================================
+
+      - name: Verify Opportunity Redistribution V1.6.1
+        run: |
+          python <<'PY'
+          import json
+          import os
+
+          CURRENT_PATH = "data/jpro-current-projections.json"
+          OUTPUT_PATH = "data/jpro-opportunity-redistribution-v161.json"
+
+          EXPECTED_SIMS = 20000
+
+          print("=" * 72)
+          print("VERIFY JPRO OPPORTUNITY REDISTRIBUTION V1.6.1")
+          print("=" * 72)
+
+          if not os.path.exists(
+              OUTPUT_PATH
+          ):
+              raise RuntimeError(
+                  "V1.6.1 audit file missing."
+              )
+
+          with open(
+              OUTPUT_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              audit = json.load(f)
+
+          with open(
+              CURRENT_PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              current = json.load(f)
+
+          if (
+              audit.get("version")
+              != "JPRO_OPPORTUNITY_REDISTRIBUTION_V1.6.1"
+          ):
+              raise RuntimeError(
+                  "Wrong V1.6.1 version."
+              )
+
+          if (
+              audit.get("status")
+              != "AUDIT_READY"
+          ):
+              raise RuntimeError(
+                  "V1.6.1 audit is not ready."
+              )
+
+          if (
+              audit.get("mode")
+              != "AUDIT_ONLY"
+          ):
+              raise RuntimeError(
+                  "V1.6.1 unexpectedly left audit-only mode."
+              )
+
+          if (
+              audit.get(
+                  "availability_source"
+              )
+              != "JPRO_AVAILABILITY_GATE_V1.5.1"
+          ):
+              raise RuntimeError(
+                  "Wrong availability source."
+              )
+
+          if audit.get(
+              "projection_changes_applied"
+          ):
+              raise RuntimeError(
+                  "V1.6.1 modified projections."
+              )
+
+          if audit.get(
+              "simulation_changes_applied"
+          ):
+              raise RuntimeError(
+                  "V1.6.1 modified simulations."
+              )
+
+          projections = current.get(
+              "projections",
+              []
+          )
+
+          if not projections:
+              raise RuntimeError(
+                  "Current projections missing."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY 20K DISTRIBUTIONS PRESERVED
+          # --------------------------------------------------------
+
+          verified_20k = 0
+
+          for prop in projections:
+
+              histogram = prop.get(
+                  "simulation_histogram",
+                  []
+              )
+
+              if not histogram:
+                  continue
+
+              total = sum(
+                  int(row[1])
+                  for row in histogram
+                  if isinstance(row, list)
+                  and len(row) >= 2
+              )
+
+              if total == EXPECTED_SIMS:
+                  verified_20k += 1
+
+          if verified_20k == 0:
+              raise RuntimeError(
+                  "20K distributions missing."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY ROLE V2 PRESERVED
+          # --------------------------------------------------------
+
+          role_v2 = 0
+
+          for prop in projections:
+
+              role = prop.get(
+                  "role",
+                  {}
+              )
+
+              if (
+                  isinstance(role, dict)
+                  and role.get(
+                      "role_method"
+                  )
+                  == "OPPORTUNITY_BLEND_V2"
+              ):
+                  role_v2 += 1
+
+          if role_v2 == 0:
+              raise RuntimeError(
+                  "Role V2 missing."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY CURRENT TRIGGER LOGIC
+          # --------------------------------------------------------
+
+          trigger_players = audit.get(
+              "trigger_players",
+              []
+          )
+
+          ignored = audit.get(
+              "ignored_blocked_players",
+              []
+          )
+
+          for player in trigger_players:
+
+              if (
+                  player.get("status")
+                  != "CURRENT_ROSTER_UNAVAILABLE"
+              ):
+                  raise RuntimeError(
+                      "Invalid redistribution trigger: "
+                      + str(
+                          player.get(
+                              "player"
+                          )
+                      )
+                      + " / "
+                      + str(
+                          player.get(
+                              "status"
+                          )
+                      )
+                  )
+
+          for player in ignored:
+
+              if (
+                  player.get("status")
+                  == "CURRENT_ROSTER_UNAVAILABLE"
+              ):
+                  raise RuntimeError(
+                      "Current-roster unavailable player "
+                      "was incorrectly ignored: "
+                      + str(
+                          player.get(
+                              "player"
+                          )
+                      )
+                  )
+
+          # --------------------------------------------------------
+          # VERIFY BENEFICIARIES
+          # --------------------------------------------------------
+
+          proposed = audit.get(
+              "proposed_adjustments",
+              []
+          )
+
+          for row in proposed:
+
+              if not row.get(
+                  "beneficiary_currently_eligible"
+              ):
+                  raise RuntimeError(
+                      "Ineligible beneficiary found: "
+                      + str(
+                          row.get(
+                              "beneficiary"
+                          )
+                      )
+                  )
+
+              if (
+                  row.get(
+                      "trigger_availability_status"
+                  )
+                  != "CURRENT_ROSTER_UNAVAILABLE"
+              ):
+                  raise RuntimeError(
+                      "Adjustment triggered by invalid "
+                      "availability status."
+                  )
+
+              if row.get(
+                  "projection_adjustment_applied"
+              ):
+                  raise RuntimeError(
+                      "Projection adjustment was applied "
+                      "during audit."
+                  )
+
+              if row.get(
+                  "simulation_adjustment_applied"
+              ):
+                  raise RuntimeError(
+                      "Simulation adjustment was applied "
+                      "during audit."
+                  )
+
+              if (
+                  row.get(
+                      "trigger_player_id"
+                  )
+                  and row.get(
+                      "beneficiary_player_id"
+                  )
+                  and str(
+                      row.get(
+                          "trigger_player_id"
+                      )
+                  )
+                  == str(
+                      row.get(
+                          "beneficiary_player_id"
+                      )
+                  )
+              ):
+                  raise RuntimeError(
+                      "Self-beneficiary relationship found."
+                  )
+
+          # --------------------------------------------------------
+          # COUNTS
+          # --------------------------------------------------------
+
+          print(
+              "Current projection rows:",
+              len(projections)
+          )
+
+          print(
+              "20K distributions:",
+              verified_20k
+          )
+
+          print(
+              "Role V2 records:",
+              role_v2
+          )
+
+          print(
+              "Availability gate:",
+              audit.get(
+                  "availability_source"
+              )
+          )
+
+          print(
+              "Historical relationships:",
+              audit.get(
+                  "historical_relationships"
+              )
+          )
+
+          print(
+              "Current blocked projected players:",
+              audit.get(
+                  "current_blocked_players"
+              )
+          )
+
+          print(
+              "Current redistribution triggers:",
+              audit.get(
+                  "current_redistribution_triggers"
+              )
+          )
+
+          print(
+              "Ignored blocked players:",
+              audit.get(
+                  "current_ignored_blocked_players"
+              )
+          )
+
+          print(
+              "Matched trigger players:",
+              audit.get(
+                  "matched_trigger_players"
+              )
+          )
+
+          print(
+              "Unmatched trigger players:",
+              audit.get(
+                  "unmatched_trigger_players"
+              )
+          )
+
+          print(
+              "Proposed adjustment rows:",
+              len(proposed)
+          )
+
+          print(
+              "Unique beneficiaries:",
+              audit.get(
+                  "unique_beneficiaries"
+              )
+          )
+
+          print("")
+          print("=" * 72)
+          print("TOP CURRENT BENEFICIARY AUDIT")
+          print("=" * 72)
+
+          for i, row in enumerate(
+              proposed[:20],
+              start=1
+          ):
+
+              print("")
+              print(
+                  f"#{i}",
+                  row.get(
+                      "beneficiary"
+                  ),
+                  "|",
+                  row.get(
+                      "beneficiary_team"
+                  )
+              )
+
+              print(
+                  "  ABSENT:",
+                  row.get(
+                      "trigger_player"
+                  )
+              )
+
+              print(
+                  "  EVIDENCE:",
+                  row.get(
+                      "evidence"
+                  )
+              )
+
+              print(
+                  "  WITHOUT GAMES:",
+                  row.get(
+                      "without_games"
+                  )
+              )
+
+              print(
+                  "  WITH GAMES:",
+                  row.get(
+                      "with_games"
+                  )
+              )
+
+              print(
+                  "  TARGET DELTA:",
+                  row.get(
+                      "deltas",
+                      {}
+                  ).get(
+                      "targets"
+                  )
+              )
+
+              print(
+                  "  CARRY DELTA:",
+                  row.get(
+                      "deltas",
+                      {}
+                  ).get(
+                      "carries"
+                  )
+              )
+
+              print(
+                  "  AIR-YARD DELTA:",
+                  row.get(
+                      "deltas",
+                      {}
+                  ).get(
+                      "receiving_air_yards"
+                  )
+              )
+
+              print(
+                  "  SIGNAL:",
+                  row.get(
+                      "opportunity_signal"
+                  )
+              )
+
+          print("")
+          print("=" * 72)
+          print("JPRO OPPORTUNITY REDISTRIBUTION V1.6.1 VERIFIED")
+          print("=" * 72)
+
+          print(
+              "V1.5.1 AVAILABILITY SOURCE: VERIFIED"
+          )
+
+          print(
+              "NON-ABSENCE BLOCKS: EXCLUDED FROM REDISTRIBUTION"
+          )
+
+          print(
+              "PROJECTION CHANGES: 0"
+          )
+
+          print(
+              "20K SIMULATION CHANGES: 0"
+          )
+
+          PY
+
+      # ============================================================
+      # SAVE
+      # ============================================================
+
+      - name: Save Opportunity Redistribution V1.6.1
+        run: |
+          git config user.name "JPro Opportunity Engine"
+          git config user.email "actions@github.com"
+
+          git add data/jpro-opportunity-redistribution-v161.json
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Add Opportunity Redistribution audit V1.6.1"
+            git push
+          fi
