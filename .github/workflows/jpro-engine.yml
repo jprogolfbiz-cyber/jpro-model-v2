@@ -1,2055 +1,2281 @@
-name: JPro Cloud Engine V1.5
+name: JPro Cloud Engine V1.5.1
 
 on:
-
   workflow_dispatch:
 
 permissions:
-
   contents: write
 
 jobs:
-
   jpro-engine:
-
     runs-on: ubuntu-latest
 
     steps:
-
       - name: Get JPro
-
         uses: actions/checkout@v4
 
       - name: Set up Python
-
         uses: actions/setup-python@v5
-
         with:
-
           python-version: "3.11"
 
       # ============================================================
-
-      # JPRO V1.5
-
+      # JPRO V1.5.1
       # PERMANENT AVAILABILITY GATE + PICKS ENGINE
-
       #
-
-      # IMPORTANT:
-
-      # Availability V1.4 has already classified projection rows.
-
+      # FIX:
+      # V1.4 availability metadata can contain raw NFL roster
+      # status codes such as:
       #
-
-      # V1.5 refuses to build a Picks candidate unless that
-
-      # projection is eligible under the current-player universe.
-
+      # ACT = Active
+      # INA = Inactive
+      # RES = Reserve
+      # DEV = Development / practice squad
+      # RET = Retired
+      # CUT = Released / cut
+      # EXE = Exempt
       #
-
-      # If availability metadata disappears, this workflow FAILS.
-
-      # It does NOT silently fall back to the old behavior.
-
+      # V1.5.1 explicitly understands these codes.
+      #
+      # FAIL-CLOSED:
+      # Unknown availability states do NOT silently become eligible.
       # ============================================================
 
-      - name: Enforce Availability Gate V1.5
-
+      - name: Enforce Availability Gate V1.5.1
         run: |
-
           python <<'PY'
-
           import json
-
           import os
-
           from collections import Counter
 
           PATH = "data/jpro-current-projections.json"
 
           print("=" * 72)
-
-          print("JPRO AVAILABILITY GATE V1.5")
-
+          print("JPRO AVAILABILITY GATE V1.5.1")
           print("=" * 72)
 
           if not os.path.exists(PATH):
-
-              raise RuntimeError(f"Missing required file: {PATH}")
+              raise RuntimeError(
+                  f"Missing required file: {PATH}"
+              )
 
           with open(PATH, "r", encoding="utf-8") as f:
-
               data = json.load(f)
 
           projections = data.get("projections", [])
 
           if not projections:
-
-              raise RuntimeError("No projections found.")
+              raise RuntimeError(
+                  "No projections found."
+              )
 
           print("Projection rows:", len(projections))
 
           # --------------------------------------------------------
-
-          # DISCOVER V1.4 AVAILABILITY FIELDS
-
+          # FIELD DISCOVERY
           # --------------------------------------------------------
 
           possible_status_keys = [
-
               "model_player_status",
-
               "availability_status",
-
               "current_player_status",
-
-              "roster_status"
-
+              "roster_status",
+              "status"
           ]
 
           possible_eligible_keys = [
-
               "availability_eligible",
-
               "current_roster_eligible",
-
               "jpro_eligible",
+              "eligible",
+              "is_eligible"
+          ]
 
-              "eligible"
+          possible_weekly_status_keys = [
+              "weekly_status",
+              "weekly_roster_status",
+              "current_week_status"
+          ]
 
+          possible_injury_status_keys = [
+              "injury_status",
+              "game_status",
+              "designation"
           ]
 
           status_key = None
-
           eligible_key = None
 
           for key in possible_status_keys:
-
-              if any(key in p for p in projections):
-
+              if any(
+                  key in p
+                  for p in projections
+              ):
                   status_key = key
-
                   break
 
           for key in possible_eligible_keys:
-
-              if any(key in p for p in projections):
-
+              if any(
+                  key in p
+                  for p in projections
+              ):
                   eligible_key = key
-
                   break
 
-          # Availability V1.4 may have placed metadata inside
-
-          # a nested availability object.
-
           nested_available = any(
-
-              isinstance(p.get("availability"), dict)
-
+              isinstance(
+                  p.get("availability"),
+                  dict
+              )
               for p in projections
-
           )
 
-          print("Detected status field:", status_key)
+          print(
+              "Detected top-level status field:",
+              status_key
+          )
 
-          print("Detected eligible field:", eligible_key)
+          print(
+              "Detected top-level eligible field:",
+              eligible_key
+          )
 
-          print("Nested availability:", nested_available)
+          print(
+              "Nested availability:",
+              nested_available
+          )
 
           if (
-
               status_key is None
-
               and eligible_key is None
-
               and not nested_available
-
           ):
-
               raise RuntimeError(
-
-                  "V1.4 availability metadata was not found on "
-
-                  "projection rows. Run JPro Availability Engine "
-
-                  "V1.4 before running the main engine."
-
+                  "Availability metadata was not found. "
+                  "Run JPro Availability Engine V1.4 "
+                  "before running the main engine."
               )
 
           # --------------------------------------------------------
-
-          # NORMALIZATION
-
+          # STATUS DEFINITIONS
           # --------------------------------------------------------
 
           ELIGIBLE_STATUSES = {
-
               "ELIGIBLE",
-
               "CURRENT_ACTIVE_ROSTER",
-
               "ACTIVE",
-
               "ACT"
-
           }
 
           BLOCKED_STATUSES = {
-
               "CURRENT_ROSTER_UNAVAILABLE",
-
               "DEVELOPMENT_PLAYER",
-
               "CURRENT_PLAYER_TEAM_MISMATCH",
-
               "UNAVAILABLE",
-
               "BLOCKED",
-
               "INACTIVE",
+              "OUT",
 
-              "OUT"
-
+              # Raw roster codes from V1.4
+              "INA",
+              "RES",
+              "DEV",
+              "RET",
+              "CUT",
+              "EXE"
           }
+
+          # These designations should never automatically
+          # become unavailable merely because of the injury
+          # designation itself.
+          NON_AUTOMATIC_BLOCK_INJURY = {
+              "",
+              "NONE",
+              "NULL",
+              "QUESTIONABLE",
+              "Q",
+              "DOUBTFUL",
+              "D"
+          }
+
+          HARD_OUT_INJURY = {
+              "OUT",
+              "O"
+          }
+
+          def normalize(value):
+              if value is None:
+                  return None
+
+              value = str(value).strip().upper()
+
+              if not value:
+                  return None
+
+              return value
+
+          def find_nested_value(
+              nested,
+              keys
+          ):
+              for key in keys:
+                  if key in nested:
+                      return nested.get(key)
+
+              return None
+
+          # --------------------------------------------------------
+          # READ V1.4 AVAILABILITY
+          # --------------------------------------------------------
 
           def read_availability(prop):
 
               nested = prop.get("availability")
 
               if not isinstance(nested, dict):
-
                   nested = {}
 
               status = None
-
               eligible = None
+              weekly_status = None
+              injury_status = None
+
+              # ----------------------------------------------
+              # TOP-LEVEL STATUS
+              # ----------------------------------------------
 
               if status_key:
-
                   status = prop.get(status_key)
 
               if status is None:
-
                   for key in possible_status_keys:
-
-                      if key in nested:
-
-                          status = nested.get(key)
-
+                      if key in prop:
+                          status = prop.get(key)
                           break
+
+              # ----------------------------------------------
+              # NESTED STATUS
+              # ----------------------------------------------
+
+              if status is None:
+                  status = find_nested_value(
+                      nested,
+                      possible_status_keys
+                  )
+
+              # ----------------------------------------------
+              # TOP-LEVEL ELIGIBILITY
+              # ----------------------------------------------
 
               if eligible_key:
-
-                  eligible = prop.get(eligible_key)
+                  eligible = prop.get(
+                      eligible_key
+                  )
 
               if eligible is None:
-
                   for key in possible_eligible_keys:
-
-                      if key in nested:
-
-                          eligible = nested.get(key)
-
+                      if key in prop:
+                          eligible = prop.get(key)
                           break
 
-              if status is not None:
+              # ----------------------------------------------
+              # NESTED ELIGIBILITY
+              # ----------------------------------------------
 
-                  status = str(status).strip().upper()
+              if eligible is None:
+                  eligible = find_nested_value(
+                      nested,
+                      possible_eligible_keys
+                  )
 
-              # Explicit eligibility boolean wins.
+              # ----------------------------------------------
+              # WEEKLY STATUS
+              # ----------------------------------------------
+
+              for key in possible_weekly_status_keys:
+                  if key in prop:
+                      weekly_status = prop.get(key)
+                      break
+
+              if weekly_status is None:
+                  weekly_status = find_nested_value(
+                      nested,
+                      possible_weekly_status_keys
+                  )
+
+              # ----------------------------------------------
+              # INJURY STATUS
+              # ----------------------------------------------
+
+              for key in possible_injury_status_keys:
+                  if key in prop:
+                      injury_status = prop.get(key)
+                      break
+
+              if injury_status is None:
+                  injury_status = find_nested_value(
+                      nested,
+                      possible_injury_status_keys
+                  )
+
+              status = normalize(status)
+              weekly_status = normalize(
+                  weekly_status
+              )
+              injury_status = normalize(
+                  injury_status
+              )
+
+              # ------------------------------------------------
+              # EXPLICIT BOOLEAN ELIGIBILITY HAS PRIORITY
+              # ------------------------------------------------
 
               if isinstance(eligible, bool):
+                  resolved = bool(eligible)
 
-                  return eligible, status or (
+                  return {
+                      "eligible": resolved,
+                      "status": (
+                          status
+                          or (
+                              "ELIGIBLE"
+                              if resolved
+                              else "BLOCKED"
+                          )
+                      ),
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "EXPLICIT_BOOLEAN"
+                  }
 
-                      "ELIGIBLE"
+              if isinstance(
+                  eligible,
+                  (int, float)
+              ):
+                  resolved = bool(eligible)
 
-                      if eligible
-
-                      else "BLOCKED"
-
-                  )
-
-              if isinstance(eligible, (int, float)):
-
-                  return bool(eligible), status or (
-
-                      "ELIGIBLE"
-
-                      if bool(eligible)
-
-                      else "BLOCKED"
-
-                  )
+                  return {
+                      "eligible": resolved,
+                      "status": (
+                          status
+                          or (
+                              "ELIGIBLE"
+                              if resolved
+                              else "BLOCKED"
+                          )
+                      ),
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "EXPLICIT_NUMERIC"
+                  }
 
               if isinstance(eligible, str):
 
-                  e = eligible.strip().upper()
+                  e = normalize(eligible)
 
                   if e in {
-
                       "TRUE",
-
                       "YES",
-
                       "1",
-
                       "ELIGIBLE",
-
-                      "ACTIVE"
-
+                      "ACTIVE",
+                      "ACT"
                   }:
-
-                      return True, status or "ELIGIBLE"
+                      return {
+                          "eligible": True,
+                          "status":
+                              status
+                              or "ELIGIBLE",
+                          "weekly_status":
+                              weekly_status,
+                          "injury_status":
+                              injury_status,
+                          "source":
+                              "EXPLICIT_STRING"
+                      }
 
                   if e in {
-
                       "FALSE",
-
                       "NO",
-
                       "0",
-
                       "BLOCKED",
-
-                      "INELIGIBLE"
-
+                      "INELIGIBLE",
+                      "UNAVAILABLE",
+                      "INA",
+                      "RES",
+                      "DEV",
+                      "RET",
+                      "CUT",
+                      "EXE"
                   }:
+                      return {
+                          "eligible": False,
+                          "status":
+                              status
+                              or "BLOCKED",
+                          "weekly_status":
+                              weekly_status,
+                          "injury_status":
+                              injury_status,
+                          "source":
+                              "EXPLICIT_STRING"
+                      }
 
-                      return False, status or "BLOCKED"
+              # ------------------------------------------------
+              # HARD INJURY OUT
+              # ------------------------------------------------
+
+              if (
+                  injury_status
+                  in HARD_OUT_INJURY
+              ):
+                  return {
+                      "eligible": False,
+                      "status":
+                          status
+                          or "OUT",
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "INJURY_OUT"
+                  }
+
+              # ------------------------------------------------
+              # PRIMARY STATUS
+              # ------------------------------------------------
 
               if status in ELIGIBLE_STATUSES:
-
-                  return True, status
+                  return {
+                      "eligible": True,
+                      "status": status,
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "PRIMARY_STATUS"
+                  }
 
               if status in BLOCKED_STATUSES:
+                  return {
+                      "eligible": False,
+                      "status": status,
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "PRIMARY_STATUS"
+                  }
 
-                  return False, status
+              # ------------------------------------------------
+              # WEEKLY STATUS FALLBACK
+              # ------------------------------------------------
+
+              if (
+                  weekly_status
+                  in ELIGIBLE_STATUSES
+              ):
+                  return {
+                      "eligible": True,
+                      "status":
+                          status
+                          or weekly_status,
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "WEEKLY_STATUS"
+                  }
+
+              if (
+                  weekly_status
+                  in BLOCKED_STATUSES
+              ):
+                  return {
+                      "eligible": False,
+                      "status":
+                          status
+                          or weekly_status,
+                      "weekly_status":
+                          weekly_status,
+                      "injury_status":
+                          injury_status,
+                      "source":
+                          "WEEKLY_STATUS"
+                  }
+
+              # ------------------------------------------------
+              # FAIL CLOSED
+              # ------------------------------------------------
 
               raise RuntimeError(
-
-                  "Projection has availability metadata but V1.5 "
-
-                  "cannot determine eligibility for "
-
-                  f"{prop.get('player')} / {prop.get('prop')}. "
-
-                  f"Status={status!r}, eligible={eligible!r}"
-
+                  "Projection has availability metadata "
+                  "but V1.5.1 cannot determine eligibility "
+                  "for "
+                  f"{prop.get('player')} / "
+                  f"{prop.get('prop')}. "
+                  f"status={status!r}, "
+                  f"weekly_status={weekly_status!r}, "
+                  f"injury_status={injury_status!r}, "
+                  f"eligible={eligible!r}, "
+                  f"nested={nested!r}"
               )
 
           # --------------------------------------------------------
-
           # APPLY GATE
-
           # --------------------------------------------------------
 
           eligible_rows = 0
-
           blocked_rows = 0
 
           eligible_players = set()
-
           blocked_players = set()
 
           status_counts = Counter()
+          source_counts = Counter()
+
+          blocked_preview = []
 
           for prop in projections:
 
-              eligible, status = read_availability(prop)
+              result = read_availability(
+                  prop
+              )
 
-              prop["jpro_availability_v15"] = {
+              eligible = result["eligible"]
+              status = result["status"]
 
-                  "eligible": bool(eligible),
+              prop[
+                  "jpro_availability_v151"
+              ] = {
+                  "eligible":
+                      bool(eligible),
 
-                  "status": status,
+                  "status":
+                      status,
 
-                  "gate_version": "JPRO_AVAILABILITY_GATE_V1.5"
+                  "weekly_status":
+                      result.get(
+                          "weekly_status"
+                      ),
 
+                  "injury_status":
+                      result.get(
+                          "injury_status"
+                      ),
+
+                  "resolution_source":
+                      result.get(
+                          "source"
+                      ),
+
+                  "gate_version":
+                      "JPRO_AVAILABILITY_GATE_V1.5.1"
               }
 
               player_id = (
-
                   prop.get("player_id")
-
                   or prop.get("player")
-
               )
 
-              status_counts[status or "UNKNOWN"] += 1
+              status_counts[
+                  status or "UNKNOWN"
+              ] += 1
+
+              source_counts[
+                  result.get(
+                      "source",
+                      "UNKNOWN"
+                  )
+              ] += 1
 
               if eligible:
-
                   eligible_rows += 1
-
-                  eligible_players.add(player_id)
+                  eligible_players.add(
+                      player_id
+                  )
 
               else:
-
                   blocked_rows += 1
+                  blocked_players.add(
+                      player_id
+                  )
 
-                  blocked_players.add(player_id)
+                  if (
+                      len(blocked_preview)
+                      < 25
+                  ):
+                      blocked_preview.append({
+                          "player":
+                              prop.get(
+                                  "player"
+                              ),
+                          "team":
+                              prop.get(
+                                  "team"
+                              ),
+                          "prop":
+                              prop.get(
+                                  "prop"
+                              ),
+                          "status":
+                              status,
+                          "weekly_status":
+                              result.get(
+                                  "weekly_status"
+                              ),
+                          "injury_status":
+                              result.get(
+                                  "injury_status"
+                              ),
+                          "source":
+                              result.get(
+                                  "source"
+                              )
+                      })
 
           if eligible_rows == 0:
-
               raise RuntimeError(
-
-                  "Availability gate blocked every projection."
-
+                  "Availability gate blocked "
+                  "every projection."
               )
 
           if blocked_rows == 0:
-
               raise RuntimeError(
-
-                  "Availability V1.4 previously identified blocked "
-
-                  "players, but V1.5 found zero blocked rows. "
-
-                  "Stopping to prevent a silent roster regression."
-
+                  "V1.4 previously identified blocked "
+                  "players, but V1.5.1 found zero "
+                  "blocked projection rows. "
+                  "Stopping to prevent a silent "
+                  "roster regression."
               )
 
-          data["jpro_availability_gate"] = {
+          data[
+              "jpro_availability_gate"
+          ] = {
+              "version":
+                  "JPRO_AVAILABILITY_GATE_V1.5.1",
 
-              "version": "JPRO_AVAILABILITY_GATE_V1.5",
+              "status":
+                  "ACTIVE",
 
-              "status": "ACTIVE",
+              "projection_rows":
+                  len(projections),
 
-              "projection_rows": len(projections),
+              "eligible_projection_rows":
+                  eligible_rows,
 
-              "eligible_projection_rows": eligible_rows,
+              "blocked_projection_rows":
+                  blocked_rows,
 
-              "blocked_projection_rows": blocked_rows,
+              "eligible_unique_players":
+                  len(eligible_players),
 
-              "eligible_unique_players": len(eligible_players),
+              "blocked_unique_players":
+                  len(blocked_players),
 
-              "blocked_unique_players": len(blocked_players),
+              "status_counts":
+                  dict(status_counts),
 
-              "status_counts": dict(status_counts)
+              "resolution_source_counts":
+                  dict(source_counts),
 
+              "fail_closed":
+                  True
           }
 
-          with open(PATH, "w", encoding="utf-8") as f:
-
-              json.dump(data, f, separators=(",", ":"))
-
-          print("")
-
-          print("Eligible projection rows:", eligible_rows)
-
-          print("Blocked projection rows:", blocked_rows)
-
-          print("Eligible unique players:", len(eligible_players))
-
-          print("Blocked unique players:", len(blocked_players))
+          with open(
+              PATH,
+              "w",
+              encoding="utf-8"
+          ) as f:
+              json.dump(
+                  data,
+                  f,
+                  separators=(",", ":")
+              )
 
           print("")
+          print(
+              "Eligible projection rows:",
+              eligible_rows
+          )
 
-          print("Statuses:")
+          print(
+              "Blocked projection rows:",
+              blocked_rows
+          )
 
-          for status, count in sorted(status_counts.items()):
+          print(
+              "Eligible unique players:",
+              len(eligible_players)
+          )
 
-              print(" ", status, ":", count)
+          print(
+              "Blocked unique players:",
+              len(blocked_players)
+          )
 
           print("")
+          print("STATUS COUNTS")
 
+          for status, count in sorted(
+              status_counts.items()
+          ):
+              print(
+                  " ",
+                  status,
+                  ":",
+                  count
+              )
+
+          print("")
+          print("RESOLUTION SOURCES")
+
+          for source, count in sorted(
+              source_counts.items()
+          ):
+              print(
+                  " ",
+                  source,
+                  ":",
+                  count
+              )
+
+          print("")
+          print("=" * 72)
+          print("BLOCKED PREVIEW")
           print("=" * 72)
 
-          print("JPRO AVAILABILITY GATE V1.5 ACTIVE")
+          for item in blocked_preview:
+              print(
+                  item["player"],
+                  "|",
+                  item["team"],
+                  "|",
+                  item["prop"],
+                  "| STATUS:",
+                  item["status"],
+                  "| WEEKLY:",
+                  item["weekly_status"],
+                  "| INJURY:",
+                  item["injury_status"],
+                  "| SOURCE:",
+                  item["source"]
+              )
 
+          print("")
+          print("=" * 72)
+          print(
+              "JPRO AVAILABILITY GATE V1.5.1 ACTIVE"
+          )
           print("=" * 72)
 
           PY
 
       # ============================================================
-
-      # PICKS ENGINE V1.5
-
+      # PICKS ENGINE V1.5.1
       # ============================================================
 
-      - name: Build JPro Picks Engine V1.5
-
+      - name: Build JPro Picks Engine V1.5.1
         run: |
-
           python <<'PY'
-
           import json
-
           import math
-
           import os
 
           PATH = "data/jpro-current-projections.json"
-
           EXPECTED_SIMS = 20000
 
           print("=" * 72)
-
-          print("JPRO PICKS ENGINE V1.5")
-
+          print("JPRO PICKS ENGINE V1.5.1")
           print("=" * 72)
 
           if not os.path.exists(PATH):
-
-              raise RuntimeError(f"Missing required file: {PATH}")
-
-          with open(PATH, "r", encoding="utf-8") as f:
-
-              data = json.load(f)
-
-          projections = data.get("projections", [])
-
-          if not projections:
-
-              raise RuntimeError("No projections found.")
-
-          gate = data.get("jpro_availability_gate", {})
-
-          if (
-
-              gate.get("version")
-
-              != "JPRO_AVAILABILITY_GATE_V1.5"
-
-              or gate.get("status") != "ACTIVE"
-
-          ):
-
               raise RuntimeError(
-
-                  "Availability Gate V1.5 is not active."
-
+                  f"Missing required file: {PATH}"
               )
 
-          print("Projections loaded:", len(projections))
+          with open(
+              PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
+              data = json.load(f)
+
+          projections = data.get(
+              "projections",
+              []
+          )
+
+          if not projections:
+              raise RuntimeError(
+                  "No projections found."
+              )
+
+          gate = data.get(
+              "jpro_availability_gate",
+              {}
+          )
+
+          if (
+              gate.get("version")
+              != "JPRO_AVAILABILITY_GATE_V1.5.1"
+              or gate.get("status")
+              != "ACTIVE"
+          ):
+              raise RuntimeError(
+                  "Availability Gate V1.5.1 "
+                  "is not active."
+              )
+
+          print(
+              "Projections loaded:",
+              len(projections)
+          )
 
           # --------------------------------------------------------
-
           # HELPERS
-
           # --------------------------------------------------------
 
-          def num(value, default=0.0):
-
+          def num(
+              value,
+              default=0.0
+          ):
               try:
-
                   value = float(value)
 
-                  if math.isnan(value) or math.isinf(value):
-
+                  if (
+                      math.isnan(value)
+                      or math.isinf(value)
+                  ):
                       return default
 
                   return value
 
               except Exception:
-
                   return default
 
-          def clamp(value, low, high):
+          def clamp(
+              value,
+              low,
+              high
+          ):
+              return max(
+                  low,
+                  min(
+                      high,
+                      value
+                  )
+              )
 
-              return max(low, min(high, value))
-
-          def fair_american(probability):
-
+          def fair_american(
+              probability
+          ):
               p = num(probability)
 
               if p <= 0 or p >= 1:
-
                   return None
 
               if p >= 0.5:
-
-                  odds = -100 * p / (1 - p)
-
+                  odds = (
+                      -100
+                      * p
+                      / (1 - p)
+                  )
               else:
+                  odds = (
+                      100
+                      * (1 - p)
+                      / p
+                  )
 
-                  odds = 100 * (1 - p) / p
+              return int(
+                  round(odds)
+              )
 
-              return int(round(odds))
-
-          def histogram_total(histogram):
-
+          def histogram_total(
+              histogram
+          ):
               total = 0
 
               for row in histogram:
-
                   if (
-
                       isinstance(row, list)
-
                       and len(row) >= 2
-
                   ):
-
-                      total += int(row[1])
+                      total += int(
+                          row[1]
+                      )
 
               return total
 
-          def probabilities_at_line(histogram, line):
-
-              total = histogram_total(histogram)
+          def probabilities_at_line(
+              histogram,
+              line
+          ):
+              total = histogram_total(
+                  histogram
+              )
 
               if total != EXPECTED_SIMS:
-
                   raise RuntimeError(
-
-                      f"Expected {EXPECTED_SIMS} simulations, "
-
-                      f"found {total}."
-
+                      f"Expected {EXPECTED_SIMS} "
+                      f"simulations, found {total}."
                   )
 
               over = 0
-
               under = 0
-
               push = 0
 
               for row in histogram:
 
-                  value = float(row[0])
+                  value = float(
+                      row[0]
+                  )
 
-                  count = int(row[1])
+                  count = int(
+                      row[1]
+                  )
 
                   if value > line:
-
                       over += count
 
                   elif value < line:
-
                       under += count
 
                   else:
-
                       push += count
 
               return {
+                  "over":
+                      over / total,
 
-                  "over": over / total,
+                  "under":
+                      under / total,
 
-                  "under": under / total,
-
-                  "push": push / total
-
+                  "push":
+                      push / total
               }
 
           def is_eligible(prop):
 
               availability = prop.get(
-
-                  "jpro_availability_v15",
-
+                  "jpro_availability_v151",
                   {}
-
               )
 
               return (
-
-                  isinstance(availability, dict)
-
-                  and availability.get("eligible") is True
-
+                  isinstance(
+                      availability,
+                      dict
+                  )
+                  and availability.get(
+                      "eligible"
+                  ) is True
+                  and availability.get(
+                      "gate_version"
+                  )
+                  == "JPRO_AVAILABILITY_GATE_V1.5.1"
               )
 
           def get_market(prop):
 
-              market = prop.get("market", {})
+              market = prop.get(
+                  "market",
+                  {}
+              )
 
-              if not isinstance(market, dict):
-
+              if not isinstance(
+                  market,
+                  dict
+              ):
                   return {}
 
               return market
 
           def get_reference_line(prop):
 
-              line = get_market(prop).get(
-
+              line = get_market(
+                  prop
+              ).get(
                   "model_reference_line"
-
               )
 
               if line is None:
-
                   return None
 
               try:
-
                   return float(line)
 
               except Exception:
-
                   return None
 
           def get_role(prop):
 
-              role = prop.get("role", {})
+              role = prop.get(
+                  "role",
+                  {}
+              )
 
-              if not isinstance(role, dict):
-
+              if not isinstance(
+                  role,
+                  dict
+              ):
                   role = {}
 
               return {
+                  "score":
+                      num(
+                          role.get(
+                              "role_score"
+                          ),
+                          50
+                      ),
 
-                  "score": num(
+                  "label":
+                      role.get(
+                          "role_label",
+                          "UNKNOWN"
+                      ),
 
-                      role.get("role_score"),
+                  "method":
+                      role.get(
+                          "role_method",
+                          ""
+                      ),
 
-                      50
-
-                  ),
-
-                  "label": role.get(
-
-                      "role_label",
-
-                      "UNKNOWN"
-
-                  ),
-
-                  "method": role.get(
-
-                      "role_method",
-
-                      ""
-
-                  ),
-
-                  "current_games": num(
-
-                      role.get("current_games"),
-
-                      0
-
-                  )
-
+                  "current_games":
+                      num(
+                          role.get(
+                              "current_games"
+                          ),
+                          0
+                      )
               }
 
           def get_matchup(prop):
 
-              matchup = prop.get("matchup", {})
+              matchup = prop.get(
+                  "matchup",
+                  {}
+              )
 
-              if not isinstance(matchup, dict):
-
+              if not isinstance(
+                  matchup,
+                  dict
+              ):
                   matchup = {}
 
               return {
+                  "score":
+                      num(
+                          matchup.get(
+                              "matchup_score"
+                          ),
+                          50
+                      ),
 
-                  "score": num(
-
-                      matchup.get("matchup_score"),
-
-                      50
-
-                  ),
-
-                  "label": matchup.get(
-
-                      "matchup_label",
-
-                      "NEUTRAL"
-
-                  )
-
+                  "label":
+                      matchup.get(
+                          "matchup_label",
+                          "NEUTRAL"
+                      )
               }
 
           # --------------------------------------------------------
-
           # BUILD CANDIDATE
-
           # --------------------------------------------------------
 
-          def build_candidate(prop, line, probs):
+          def build_candidate(
+              prop,
+              line,
+              probs
+          ):
 
               role = get_role(prop)
-
               matchup = get_matchup(prop)
-
               market = get_market(prop)
 
               projection = num(
-
-                  prop.get("projection")
-
+                  prop.get(
+                      "projection"
+                  )
               )
 
               median = num(
-
-                  prop.get("median")
-
+                  prop.get(
+                      "median"
+                  )
               )
 
               p25 = num(
-
-                  prop.get("p25")
-
+                  prop.get(
+                      "p25"
+                  )
               )
 
               p75 = num(
-
-                  prop.get("p75")
-
+                  prop.get(
+                      "p75"
+                  )
               )
 
-              if probs["over"] >= probs["under"]:
-
+              if (
+                  probs["over"]
+                  >= probs["under"]
+              ):
                   side = "OVER"
-
-                  probability = probs["over"]
+                  probability = probs[
+                      "over"
+                  ]
 
               else:
-
                   side = "UNDER"
-
-                  probability = probs["under"]
+                  probability = probs[
+                      "under"
+                  ]
 
               if side == "OVER":
-
                   matchup_support = (
-
-                      matchup["score"] - 50
-
+                      matchup["score"]
+                      - 50
                   )
 
               else:
-
                   matchup_support = (
-
-                      50 - matchup["score"]
-
+                      50
+                      - matchup["score"]
                   )
 
               iqr = max(
-
                   p75 - p25,
-
                   0
-
               )
 
               if median > 0:
-
-                  relative_spread = iqr / median
+                  relative_spread = (
+                      iqr / median
+                  )
 
               else:
-
                   relative_spread = 0
 
               stability = clamp(
-
-                  100 - relative_spread * 25,
-
-                  0,
-
                   100
-
+                  - relative_spread
+                  * 25,
+                  0,
+                  100
               )
 
               candidate_score = (
+                  probability
+                  * 100
+                  * 0.65
 
-                  probability * 100 * 0.65
-
-                  + role["score"] * 0.20
+                  + role["score"]
+                  * 0.20
 
                   + clamp(
-
-                      50 + matchup_support,
-
+                      50
+                      + matchup_support,
                       0,
-
                       100
+                  )
+                  * 0.10
 
-                  ) * 0.10
-
-                  + stability * 0.05
-
+                  + stability
+                  * 0.05
               )
 
               candidate_score = clamp(
-
                   candidate_score,
-
                   0,
-
                   100
-
               )
 
               if (
-
                   probability >= 0.65
-
                   and role["score"] >= 65
-
               ):
-
-                  screening_status = "HIGH_PRIORITY"
+                  screening_status = (
+                      "HIGH_PRIORITY"
+                  )
 
               elif (
-
                   probability >= 0.60
-
                   and role["score"] >= 55
-
               ):
-
-                  screening_status = "REVIEW"
-
-              else:
-
-                  screening_status = "WATCH"
-
-              if side == "OVER":
-
-                  projection_distance = (
-
-                      projection - line
-
+                  screening_status = (
+                      "REVIEW"
                   )
 
               else:
+                  screening_status = (
+                      "WATCH"
+                  )
 
+              if side == "OVER":
                   projection_distance = (
+                      projection
+                      - line
+                  )
 
-                      line - projection
-
+              else:
+                  projection_distance = (
+                      line
+                      - projection
                   )
 
               reasons = [
-
                   (
-
                       "20K simulation probability: "
-
                       + str(
-
                           round(
-
-                              probability * 100,
-
+                              probability
+                              * 100,
                               1
-
                           )
-
                       )
-
                       + "%"
-
                   )
-
               ]
 
               if role["score"] >= 80:
-
                   reasons.append(
-
                       "Featured opportunity profile"
-
                   )
 
               elif role["score"] >= 65:
-
                   reasons.append(
-
                       "Strong expected opportunity"
-
                   )
 
               elif role["score"] >= 50:
-
                   reasons.append(
-
                       "Stable expected opportunity"
-
                   )
 
               else:
-
                   reasons.append(
-
                       "Expected opportunity below stable range"
-
                   )
 
               if (
-
                   side == "OVER"
-
                   and matchup["score"] >= 65
-
               ):
-
                   reasons.append(
-
-                      "Opponent production matchup supports over direction"
-
+                      "Opponent production matchup "
+                      "supports over direction"
                   )
 
               elif (
-
                   side == "UNDER"
-
                   and matchup["score"] <= 35
-
               ):
-
                   reasons.append(
-
-                      "Opponent production matchup supports under direction"
-
+                      "Opponent production matchup "
+                      "supports under direction"
                   )
 
               elif (
-
                   side == "OVER"
-
                   and matchup["score"] <= 35
-
               ):
-
                   reasons.append(
-
-                      "Opponent production matchup resists over direction"
-
+                      "Opponent production matchup "
+                      "resists over direction"
                   )
 
               elif (
-
                   side == "UNDER"
-
                   and matchup["score"] >= 65
-
               ):
-
                   reasons.append(
-
-                      "Opponent production matchup resists under direction"
-
+                      "Opponent production matchup "
+                      "resists under direction"
                   )
 
               reasons.append(
-
                   "Projection distance from reference: "
-
-                  + str(round(projection_distance, 2))
-
+                  + str(
+                      round(
+                          projection_distance,
+                          2
+                      )
+                  )
               )
 
               reasons.append(
-
-                  "Current-roster availability gate passed"
-
+                  "Current-player availability "
+                  "gate V1.5.1 passed"
               )
 
               risks = []
 
-              if role["current_games"] <= 2:
-
+              if (
+                  role["current_games"]
+                  <= 2
+              ):
                   risks.append(
-
-                      "Current-season sample is limited"
-
+                      "Current-season sample "
+                      "is limited"
                   )
 
               if (
-
                   median > 0
-
-                  and relative_spread >= 0.75
-
+                  and relative_spread
+                  >= 0.75
               ):
-
                   risks.append(
-
-                      "Simulation distribution is relatively wide"
-
+                      "Simulation distribution "
+                      "is relatively wide"
                   )
 
               if (
-
                   side == "OVER"
-
                   and role["score"] < 50
-
               ):
-
                   risks.append(
-
-                      "Expected opportunity is below stable range"
-
+                      "Expected opportunity is "
+                      "below stable range"
                   )
 
               if (
-
                   side == "OVER"
-
                   and matchup["score"] <= 35
-
               ):
-
                   risks.append(
-
-                      "Opponent production matchup is difficult"
-
+                      "Opponent production matchup "
+                      "is difficult"
                   )
 
               if (
-
                   side == "UNDER"
-
                   and matchup["score"] >= 65
-
               ):
-
                   risks.append(
-
-                      "Opponent production matchup favors offense"
-
+                      "Opponent production matchup "
+                      "favors offense"
                   )
 
               if not risks:
-
                   risks.append(
-
-                      "Usage, injuries and game script remain uncertain"
-
+                      "Usage, injuries and game "
+                      "script remain uncertain"
                   )
 
               return {
+                  "game":
+                      prop.get("game"),
 
-                  "game": prop.get("game"),
+                  "team":
+                      prop.get("team"),
 
-                  "team": prop.get("team"),
+                  "opponent":
+                      prop.get("opponent"),
 
-                  "opponent": prop.get("opponent"),
+                  "player_id":
+                      prop.get("player_id"),
 
-                  "player_id": prop.get("player_id"),
+                  "player":
+                      prop.get("player"),
 
-                  "player": prop.get("player"),
+                  "position":
+                      prop.get("position"),
 
-                  "position": prop.get("position"),
+                  "prop":
+                      prop.get("prop"),
 
-                  "prop": prop.get("prop"),
+                  "side":
+                      side,
 
-                  "side": side,
+                  "model_reference_line":
+                      line,
 
-                  "model_reference_line": line,
+                  "reference_line_type":
+                      "MODEL_REFERENCE",
 
-                  "reference_line_type": "MODEL_REFERENCE",
+                  "projection":
+                      round(
+                          projection,
+                          2
+                      ),
 
-                  "projection": round(projection, 2),
+                  "median":
+                      round(
+                          median,
+                          2
+                      ),
 
-                  "median": round(median, 2),
+                  "over_probability":
+                      round(
+                          probs["over"],
+                          4
+                      ),
 
-                  "over_probability": round(
+                  "under_probability":
+                      round(
+                          probs["under"],
+                          4
+                      ),
 
-                      probs["over"],
+                  "push_probability":
+                      round(
+                          probs["push"],
+                          4
+                      ),
 
-                      4
+                  "model_probability":
+                      round(
+                          probability,
+                          4
+                      ),
 
-                  ),
+                  "model_probability_pct":
+                      round(
+                          probability
+                          * 100,
+                          1
+                      ),
 
-                  "under_probability": round(
+                  "fair_odds":
+                      fair_american(
+                          probability
+                      ),
 
-                      probs["under"],
+                  "role_score":
+                      round(
+                          role["score"],
+                          2
+                      ),
 
-                      4
+                  "role_label":
+                      role["label"],
 
-                  ),
+                  "role_method":
+                      role["method"],
 
-                  "push_probability": round(
+                  "matchup_score":
+                      round(
+                          matchup["score"],
+                          2
+                      ),
 
-                      probs["push"],
-
-                      4
-
-                  ),
-
-                  "model_probability": round(
-
-                      probability,
-
-                      4
-
-                  ),
-
-                  "model_probability_pct": round(
-
-                      probability * 100,
-
-                      1
-
-                  ),
-
-                  "fair_odds": fair_american(
-
-                      probability
-
-                  ),
-
-                  "role_score": round(
-
-                      role["score"],
-
-                      2
-
-                  ),
-
-                  "role_label": role["label"],
-
-                  "role_method": role["method"],
-
-                  "matchup_score": round(
-
-                      matchup["score"],
-
-                      2
-
-                  ),
-
-                  "matchup_label": matchup["label"],
+                  "matchup_label":
+                      matchup["label"],
 
                   "distribution_stability_score":
-
-                      round(stability, 2),
+                      round(
+                          stability,
+                          2
+                      ),
 
                   "candidate_score":
-
-                      round(candidate_score, 2),
+                      round(
+                          candidate_score,
+                          2
+                      ),
 
                   "screening_status":
-
                       screening_status,
 
                   "availability_status":
-
                       "ELIGIBLE",
 
                   "availability_gate":
-
-                      "JPRO_AVAILABILITY_GATE_V1.5",
+                      "JPRO_AVAILABILITY_GATE_V1.5.1",
 
                   "market_engine_reference_lean":
-
                       market.get(
-
                           "model_reference_lean"
-
                       ),
 
                   "market_engine_reference_probability":
-
                       market.get(
-
                           "model_reference_probability"
-
                       ),
 
-                  "sportsbook": None,
+                  "sportsbook":
+                      None,
 
-                  "sportsbook_line": None,
+                  "sportsbook_line":
+                      None,
 
-                  "sportsbook_odds": None,
+                  "sportsbook_odds":
+                      None,
 
-                  "sportsbook_implied_probability": None,
+                  "sportsbook_implied_probability":
+                      None,
 
-                  "model_edge": None,
+                  "model_edge":
+                      None,
 
-                  "qualified_pick": False,
+                  "qualified_pick":
+                      False,
 
                   "status":
-
                       "AWAITING_SPORTSBOOK_PRICE",
 
-                  "reasons": reasons,
+                  "reasons":
+                      reasons,
 
-                  "risk_factors": risks
-
+                  "risk_factors":
+                      risks
               }
 
           # --------------------------------------------------------
-
-          # PROCESS
-
+          # PROCESS PROJECTIONS
           # --------------------------------------------------------
 
           candidates = []
 
           processed = 0
-
           blocked_availability = 0
-
           skipped_no_histogram = 0
-
           skipped_no_market = 0
-
           skipped_no_reference_line = 0
 
           for prop in projections:
 
               # ----------------------------------------------
-
-              # V1.5 PERMANENT GATE
-
+              # PERMANENT V1.5.1 AVAILABILITY GATE
               # ----------------------------------------------
 
               if not is_eligible(prop):
 
                   blocked_availability += 1
 
-                  # Remove stale Picks analysis if it exists.
-
-                  prop.pop("picks_analysis", None)
+                  # Remove stale analysis from blocked player.
+                  prop.pop(
+                      "picks_analysis",
+                      None
+                  )
 
                   continue
 
               histogram = prop.get(
-
                   "simulation_histogram",
-
                   []
-
               )
 
               if not histogram:
-
                   skipped_no_histogram += 1
-
                   continue
 
-              total = histogram_total(histogram)
+              total = histogram_total(
+                  histogram
+              )
 
               if total != EXPECTED_SIMS:
-
                   raise RuntimeError(
-
                       "Invalid simulation count for "
-
-                      + str(prop.get("player"))
-
+                      + str(
+                          prop.get("player")
+                      )
                       + " "
-
-                      + str(prop.get("prop"))
-
+                      + str(
+                          prop.get("prop")
+                      )
                       + ": "
-
                       + str(total)
-
                   )
 
-              market = get_market(prop)
+              market = get_market(
+                  prop
+              )
 
               if not market:
-
                   skipped_no_market += 1
-
                   continue
 
-              line = get_reference_line(prop)
+              line = get_reference_line(
+                  prop
+              )
 
               if line is None:
-
                   skipped_no_reference_line += 1
-
                   continue
 
               probs = probabilities_at_line(
-
                   histogram,
-
                   line
-
               )
 
               candidate = build_candidate(
-
                   prop,
-
                   line,
-
                   probs
-
               )
 
-              prop["picks_analysis"] = {
-
-                  "version": "JPRO_PICKS_V1.5",
+              prop[
+                  "picks_analysis"
+              ] = {
+                  "version":
+                      "JPRO_PICKS_V1.5.1",
 
                   "availability_gate":
+                      "JPRO_AVAILABILITY_GATE_V1.5.1",
 
-                      "JPRO_AVAILABILITY_GATE_V1.5",
+                  "availability_eligible":
+                      True,
 
-                  "availability_eligible": True,
-
-                  "model_reference_line": line,
+                  "model_reference_line":
+                      line,
 
                   "side":
-
                       candidate["side"],
 
                   "model_probability":
-
                       candidate[
-
                           "model_probability"
-
                       ],
 
                   "fair_odds":
-
-                      candidate["fair_odds"],
+                      candidate[
+                          "fair_odds"
+                      ],
 
                   "candidate_score":
-
                       candidate[
-
                           "candidate_score"
-
                       ],
 
                   "screening_status":
-
                       candidate[
-
                           "screening_status"
-
                       ],
 
-                  "sportsbook_line": None,
+                  "sportsbook_line":
+                      None,
 
-                  "sportsbook_odds": None,
+                  "sportsbook_odds":
+                      None,
 
-                  "model_edge": None,
+                  "model_edge":
+                      None,
 
-                  "qualified_pick": False,
+                  "qualified_pick":
+                      False,
 
                   "status":
-
                       "AWAITING_SPORTSBOOK_PRICE"
-
               }
 
               if (
-
-                  candidate["model_probability"]
-
+                  candidate[
+                      "model_probability"
+                  ]
                   >= 0.55
-
               ):
-
-                  candidates.append(candidate)
+                  candidates.append(
+                      candidate
+                  )
 
               processed += 1
 
+          # --------------------------------------------------------
+          # SORT
+          # --------------------------------------------------------
+
           candidates.sort(
-
               key=lambda item: (
-
-                  item["candidate_score"],
-
-                  item["model_probability"]
-
+                  item[
+                      "candidate_score"
+                  ],
+                  item[
+                      "model_probability"
+                  ]
               ),
-
               reverse=True
-
           )
 
           high_priority = [
-
               item
-
               for item in candidates
-
-              if item["screening_status"]
-
-              == "HIGH_PRIORITY"
-
+              if item[
+                  "screening_status"
+              ] == "HIGH_PRIORITY"
           ]
 
           review = [
-
               item
-
               for item in candidates
-
-              if item["screening_status"]
-
-              == "REVIEW"
-
+              if item[
+                  "screening_status"
+              ] == "REVIEW"
           ]
 
           watch = [
-
               item
-
               for item in candidates
-
-              if item["screening_status"]
-
-              == "WATCH"
-
+              if item[
+                  "screening_status"
+              ] == "WATCH"
           ]
 
-          data["jpro_picks_engine"] = {
+          # --------------------------------------------------------
+          # SAVE PICKS ENGINE
+          # --------------------------------------------------------
 
-              "version": "JPRO_PICKS_V1.5",
+          data[
+              "jpro_picks_engine"
+          ] = {
+              "version":
+                  "JPRO_PICKS_V1.5.1",
 
               "status":
-
                   "READY_FOR_MARKET_INPUT",
 
               "method":
-
-                  "20K_SIM_ROLE_V2_MATCHUP_V1_AVAILABILITY_V15",
+                  "20K_SIM_ROLE_V2_MATCHUP_V1_AVAILABILITY_V151",
 
               "reference_source":
-
                   "market.model_reference_line",
 
               "availability_gate":
+                  "JPRO_AVAILABILITY_GATE_V1.5.1",
 
-                  "JPRO_AVAILABILITY_GATE_V1.5",
+              "availability_enforced":
+                  True,
 
-              "availability_enforced": True,
+              "fail_closed_availability":
+                  True,
 
-              "sportsbook_data_connected": False,
+              "sportsbook_data_connected":
+                  False,
 
-              "qualified_picks_enabled": False,
+              "qualified_picks_enabled":
+                  False,
 
               "candidate_count":
-
                   len(candidates),
 
               "high_priority_count":
-
                   len(high_priority),
 
               "review_count":
-
                   len(review),
 
               "watch_count":
-
                   len(watch),
 
               "blocked_projection_rows":
-
                   blocked_availability,
 
               "note":
-
                   (
-
-                      "Candidates must pass the current-roster "
-
-                      "availability gate before entering JPro Picks. "
-
-                      "A real sportsbook line and price are still "
-
-                      "required before model edge can be calculated."
-
+                      "Candidates must pass the "
+                      "current-player availability "
+                      "gate before entering JPro Picks. "
+                      "A real sportsbook line and price "
+                      "are required before model edge "
+                      "can be calculated."
                   )
-
           }
 
-          data["jpro_picks_candidates"] = candidates
+          data[
+              "jpro_picks_candidates"
+          ] = candidates
 
           data[
-
               "jpro_high_priority_candidates"
-
           ] = high_priority
 
           data[
-
               "jpro_review_candidates"
-
           ] = review
 
           data[
-
               "jpro_watch_candidates"
-
           ] = watch
 
+          # No real priced sportsbook picks.
           data["jpro_picks"] = []
 
-          data["picks_engine_ready"] = True
+          data[
+              "picks_engine_ready"
+          ] = True
 
           data[
-
               "picks_engine_version"
+          ] = "JPRO_PICKS_V1.5.1"
 
-          ] = "JPRO_PICKS_V1.5"
-
-          with open(PATH, "w", encoding="utf-8") as f:
-
+          with open(
+              PATH,
+              "w",
+              encoding="utf-8"
+          ) as f:
               json.dump(
-
                   data,
-
                   f,
-
                   separators=(",", ":")
-
               )
 
+          # --------------------------------------------------------
+          # OUTPUT
+          # --------------------------------------------------------
+
           print("")
-
           print("=" * 72)
-
-          print("JPRO PICKS ENGINE V1.5 COMPLETE")
-
+          print(
+              "JPRO PICKS ENGINE V1.5.1 COMPLETE"
+          )
           print("=" * 72)
-
-          print("Total projections:", len(projections))
-
-          print("Availability blocked:", blocked_availability)
-
-          print("Eligible processed:", processed)
-
-          print("Skipped - no histogram:", skipped_no_histogram)
-
-          print("Skipped - no market:", skipped_no_market)
 
           print(
-
-              "Skipped - no reference line:",
-
-              skipped_no_reference_line
-
+              "Total projections:",
+              len(projections)
           )
 
-          print("Candidates:", len(candidates))
+          print(
+              "Availability blocked:",
+              blocked_availability
+          )
 
-          print("High priority:", len(high_priority))
+          print(
+              "Eligible processed:",
+              processed
+          )
 
-          print("Review:", len(review))
+          print(
+              "Skipped - no histogram:",
+              skipped_no_histogram
+          )
 
-          print("Watch:", len(watch))
+          print(
+              "Skipped - no market:",
+              skipped_no_market
+          )
+
+          print(
+              "Skipped - no reference line:",
+              skipped_no_reference_line
+          )
+
+          print(
+              "Candidates:",
+              len(candidates)
+          )
+
+          print(
+              "High priority:",
+              len(high_priority)
+          )
+
+          print(
+              "Review:",
+              len(review)
+          )
+
+          print(
+              "Watch:",
+              len(watch)
+          )
 
           print("")
-
           print("=" * 72)
-
-          print("TOP ELIGIBLE CANDIDATES")
-
+          print(
+              "TOP ELIGIBLE CANDIDATES"
+          )
           print("=" * 72)
 
           for i, item in enumerate(
-
               candidates[:25],
-
               start=1
-
           ):
 
               print("")
 
               print(
-
                   f"#{i}",
-
                   item.get("player"),
-
                   "|",
-
                   item.get("team"),
-
                   "vs",
-
                   item.get("opponent")
-
               )
 
-              print("  PROP:", item.get("prop"))
-
-              print("  SIDE:", item.get("side"))
+              print(
+                  "  PROP:",
+                  item.get("prop")
+              )
 
               print(
+                  "  SIDE:",
+                  item.get("side")
+              )
 
+              print(
                   "  REFERENCE:",
-
-                  item.get("model_reference_line")
-
+                  item.get(
+                      "model_reference_line"
+                  )
               )
 
               print(
-
                   "  PROJECTION:",
-
-                  item.get("projection")
-
+                  item.get(
+                      "projection"
+                  )
               )
 
               print(
-
                   "  MODEL PROBABILITY:",
-
                   str(
-
                       item.get(
-
                           "model_probability_pct"
-
                       )
-
-                  ) + "%"
-
+                  )
+                  + "%"
               )
 
               print(
+                  "  FAIR ODDS:",
+                  item.get(
+                      "fair_odds"
+                  )
+              )
 
+              print(
                   "  ROLE:",
-
-                  item.get("role_label"),
-
-                  item.get("role_score")
-
+                  item.get(
+                      "role_label"
+                  ),
+                  item.get(
+                      "role_score"
+                  )
               )
 
               print(
-
                   "  MATCHUP:",
-
-                  item.get("matchup_label"),
-
-                  item.get("matchup_score")
-
+                  item.get(
+                      "matchup_label"
+                  ),
+                  item.get(
+                      "matchup_score"
+                  )
               )
 
               print(
-
                   "  SCREEN:",
-
-                  item.get("screening_status")
-
+                  item.get(
+                      "screening_status"
+                  )
               )
 
               print(
-
                   "  AVAILABILITY:",
-
-                  item.get("availability_status")
-
+                  item.get(
+                      "availability_status"
+                  )
               )
 
           print("")
-
           print("Saved:", PATH)
 
           PY
 
       # ============================================================
-
       # VERIFY EVERYTHING
-
       # ============================================================
 
-      - name: Verify JPro Engine V1.5
-
+      - name: Verify JPro Engine V1.5.1
         run: |
-
           python <<'PY'
-
           import json
 
           PATH = "data/jpro-current-projections.json"
-
           EXPECTED_SIMS = 20000
 
           print("=" * 72)
-
-          print("VERIFY JPRO ENGINE V1.5")
-
+          print("VERIFY JPRO ENGINE V1.5.1")
           print("=" * 72)
 
-          with open(PATH, "r", encoding="utf-8") as f:
-
+          with open(
+              PATH,
+              "r",
+              encoding="utf-8"
+          ) as f:
               data = json.load(f)
 
+          # --------------------------------------------------------
+          # VERIFY GATE
+          # --------------------------------------------------------
+
           gate = data.get(
-
               "jpro_availability_gate",
-
               {}
-
           )
 
           if (
-
               gate.get("version")
-
-              != "JPRO_AVAILABILITY_GATE_V1.5"
-
+              != "JPRO_AVAILABILITY_GATE_V1.5.1"
           ):
-
               raise RuntimeError(
-
-                  "Wrong availability gate version."
-
-              )
-
-          if gate.get("status") != "ACTIVE":
-
-              raise RuntimeError(
-
-                  "Availability gate is not active."
-
+                  "Wrong availability "
+                  "gate version."
               )
 
           if (
-
-              data.get("picks_engine_version")
-
-              != "JPRO_PICKS_V1.5"
-
+              gate.get("status")
+              != "ACTIVE"
           ):
-
               raise RuntimeError(
+                  "Availability gate "
+                  "is not active."
+              )
 
+          if (
+              gate.get("fail_closed")
+              is not True
+          ):
+              raise RuntimeError(
+                  "Availability gate "
+                  "is not fail-closed."
+              )
+
+          # --------------------------------------------------------
+          # VERIFY PICKS VERSION
+          # --------------------------------------------------------
+
+          if (
+              data.get(
+                  "picks_engine_version"
+              )
+              != "JPRO_PICKS_V1.5.1"
+          ):
+              raise RuntimeError(
                   "Wrong Picks Engine version."
-
               )
 
           engine = data.get(
-
               "jpro_picks_engine",
-
               {}
-
           )
 
           if not engine.get(
-
               "availability_enforced"
-
           ):
-
               raise RuntimeError(
-
-                  "Picks Engine is not enforcing availability."
-
+                  "Picks Engine is not "
+                  "enforcing availability."
               )
 
           projections = data.get(
-
               "projections",
-
               []
-
           )
 
           candidates = data.get(
-
               "jpro_picks_candidates",
-
               []
-
           )
 
           if not projections:
-
               raise RuntimeError(
-
                   "No projections."
-
               )
 
           if not candidates:
-
               raise RuntimeError(
-
                   "No Picks candidates."
-
               )
 
           # --------------------------------------------------------
-
-          # VERIFY EVERY PROJECTION HAS V1.5 GATE
-
+          # VERIFY EVERY PROJECTION
           # --------------------------------------------------------
 
           eligible_rows = 0
-
           blocked_rows = 0
 
+          eligible_player_ids = set()
           blocked_player_ids = set()
 
           for prop in projections:
 
               availability = prop.get(
-
-                  "jpro_availability_v15",
-
+                  "jpro_availability_v151",
                   {}
-
               )
 
               if (
-
                   not isinstance(
-
                       availability,
-
                       dict
-
                   )
-
                   or availability.get(
-
                       "gate_version"
-
                   )
-
-                  != "JPRO_AVAILABILITY_GATE_V1.5"
-
+                  != "JPRO_AVAILABILITY_GATE_V1.5.1"
               ):
-
                   raise RuntimeError(
-
-                      "Projection missing V1.5 availability gate: "
-
-                      + str(prop.get("player"))
-
+                      "Projection missing "
+                      "V1.5.1 availability gate: "
+                      + str(
+                          prop.get("player")
+                      )
                   )
 
-              if availability.get("eligible") is True:
+              player_id = (
+                  prop.get("player_id")
+                  or prop.get("player")
+              )
 
+              if (
+                  availability.get(
+                      "eligible"
+                  )
+                  is True
+              ):
                   eligible_rows += 1
 
-              else:
+                  eligible_player_ids.add(
+                      player_id
+                  )
 
+              else:
                   blocked_rows += 1
 
                   blocked_player_ids.add(
-
-                      prop.get("player_id")
-
-                      or prop.get("player")
-
+                      player_id
                   )
 
-                  # Blocked rows must not retain Picks analysis.
-
-                  if prop.get("picks_analysis"):
-
+                  if prop.get(
+                      "picks_analysis"
+                  ):
                       raise RuntimeError(
-
-                          "Blocked projection still has Picks analysis: "
-
-                          + str(prop.get("player"))
-
+                          "Blocked projection still "
+                          "has Picks analysis: "
+                          + str(
+                              prop.get("player")
+                          )
                       )
 
+          if eligible_rows == 0:
+              raise RuntimeError(
+                  "No eligible projections."
+              )
+
+          if blocked_rows == 0:
+              raise RuntimeError(
+                  "No blocked projections. "
+                  "Possible availability regression."
+              )
+
           # --------------------------------------------------------
-
           # VERIFY ZERO BLOCKED CANDIDATES
-
           # --------------------------------------------------------
 
           for item in candidates:
 
               player_id = (
-
                   item.get("player_id")
-
                   or item.get("player")
-
               )
 
-              if player_id in blocked_player_ids:
-
+              if (
+                  player_id
+                  in blocked_player_ids
+              ):
                   raise RuntimeError(
-
-                      "BLOCKED PLAYER ENTERED JPRO PICKS: "
-
-                      + str(item.get("player"))
-
+                      "BLOCKED PLAYER ENTERED "
+                      "JPRO PICKS: "
+                      + str(
+                          item.get("player")
+                      )
                   )
 
               if (
-
-                  item.get("availability_status")
-
+                  item.get(
+                      "availability_status"
+                  )
                   != "ELIGIBLE"
-
               ):
-
                   raise RuntimeError(
-
-                      "Candidate does not have ELIGIBLE status: "
-
-                      + str(item.get("player"))
-
+                      "Candidate does not have "
+                      "ELIGIBLE status: "
+                      + str(
+                          item.get("player")
+                      )
                   )
 
               if (
-
-                  item.get("availability_gate")
-
-                  != "JPRO_AVAILABILITY_GATE_V1.5"
-
+                  item.get(
+                      "availability_gate"
+                  )
+                  != "JPRO_AVAILABILITY_GATE_V1.5.1"
               ):
-
                   raise RuntimeError(
-
-                      "Candidate missing V1.5 gate: "
-
-                      + str(item.get("player"))
-
+                      "Candidate missing "
+                      "V1.5.1 gate: "
+                      + str(
+                          item.get("player")
+                      )
                   )
 
-              # No fabricated sportsbook information.
+              # No fabricated sportsbook info.
 
-              if item.get("sportsbook") is not None:
-
+              if (
+                  item.get("sportsbook")
+                  is not None
+              ):
                   raise RuntimeError(
-
                       "Fabricated sportsbook."
-
                   )
 
-              if item.get("sportsbook_line") is not None:
-
+              if (
+                  item.get(
+                      "sportsbook_line"
+                  )
+                  is not None
+              ):
                   raise RuntimeError(
-
                       "Fabricated sportsbook line."
-
                   )
 
-              if item.get("sportsbook_odds") is not None:
-
+              if (
+                  item.get(
+                      "sportsbook_odds"
+                  )
+                  is not None
+              ):
                   raise RuntimeError(
-
                       "Fabricated sportsbook odds."
-
                   )
 
-              if item.get("model_edge") is not None:
-
+              if (
+                  item.get(
+                      "model_edge"
+                  )
+                  is not None
+              ):
                   raise RuntimeError(
-
-                      "Edge exists without real price."
-
+                      "Edge exists without "
+                      "real price."
                   )
 
-              if item.get("qualified_pick"):
-
+              if item.get(
+                  "qualified_pick"
+              ):
                   raise RuntimeError(
-
-                      "Unpriced candidate marked qualified."
-
+                      "Unpriced candidate "
+                      "marked qualified."
                   )
 
           # --------------------------------------------------------
-
-          # VERIFY 20K SIMULATIONS REMAIN
-
+          # VERIFY 20K DISTRIBUTIONS
           # --------------------------------------------------------
 
           verified_20k = 0
@@ -2057,73 +2283,55 @@ jobs:
           for prop in projections:
 
               histogram = prop.get(
-
                   "simulation_histogram",
-
                   []
-
               )
 
               if not histogram:
-
                   continue
 
               total = sum(
-
                   int(row[1])
-
                   for row in histogram
-
               )
 
               if total == EXPECTED_SIMS:
-
                   verified_20k += 1
 
           if verified_20k == 0:
-
               raise RuntimeError(
-
                   "20K distributions missing."
-
               )
 
           # --------------------------------------------------------
-
           # VERIFY ROLE V2
-
           # --------------------------------------------------------
 
           role_v2 = 0
 
           for prop in projections:
 
-              role = prop.get("role", {})
+              role = prop.get(
+                  "role",
+                  {}
+              )
 
               if (
-
                   isinstance(role, dict)
-
-                  and role.get("role_method")
-
+                  and role.get(
+                      "role_method"
+                  )
                   == "OPPORTUNITY_BLEND_V2"
-
               ):
-
                   role_v2 += 1
 
           if role_v2 == 0:
-
               raise RuntimeError(
-
                   "Role V2 missing."
-
               )
 
           # --------------------------------------------------------
-
           # VERIFY MATCHUPS
-
           # --------------------------------------------------------
 
           matchups = 0
@@ -2131,35 +2339,26 @@ jobs:
           for prop in projections:
 
               matchup = prop.get(
-
                   "matchup",
-
                   {}
-
               )
 
               if (
-
-                  isinstance(matchup, dict)
-
+                  isinstance(
+                      matchup,
+                      dict
+                  )
                   and matchup
-
               ):
-
                   matchups += 1
 
           if matchups == 0:
-
               raise RuntimeError(
-
                   "Matchup intelligence missing."
-
               )
 
           # --------------------------------------------------------
-
-          # VERIFY MARKET LINES
-
+          # VERIFY MARKET REFERENCE LINES
           # --------------------------------------------------------
 
           market_lines = 0
@@ -2167,183 +2366,200 @@ jobs:
           for prop in projections:
 
               market = prop.get(
-
                   "market",
-
                   {}
-
               )
 
               if (
-
-                  isinstance(market, dict)
-
-                  and market.get(
-
-                      "model_reference_line"
-
+                  isinstance(
+                      market,
+                      dict
                   )
-
+                  and market.get(
+                      "model_reference_line"
+                  )
                   is not None
-
               ):
-
                   market_lines += 1
 
           if market_lines == 0:
-
               raise RuntimeError(
-
                   "Market reference lines missing."
-
               )
 
+          # --------------------------------------------------------
+          # VERIFY CANDIDATE GROUPS
+          # --------------------------------------------------------
+
           high_priority = data.get(
-
               "jpro_high_priority_candidates",
-
               []
-
           )
 
           review = data.get(
-
               "jpro_review_candidates",
-
               []
-
           )
 
           watch = data.get(
-
               "jpro_watch_candidates",
-
               []
-
           )
 
           if (
-
               len(high_priority)
-
               + len(review)
-
               + len(watch)
-
               != len(candidates)
-
           ):
-
               raise RuntimeError(
-
-                  "Candidate groups do not match."
-
+                  "Candidate groups "
+                  "do not match."
               )
 
+          # --------------------------------------------------------
+          # VERIFY NO FAKE REAL-MARKET PICKS
+          # --------------------------------------------------------
+
           actual_picks = data.get(
-
               "jpro_picks",
-
               []
-
           )
 
           if actual_picks:
-
               raise RuntimeError(
-
-                  "Actual picks should remain empty "
-
-                  "until real market input exists."
-
+                  "Actual picks should remain "
+                  "empty until real market "
+                  "input exists."
               )
 
-          print("Projection rows:", len(projections))
+          # --------------------------------------------------------
+          # FINAL OUTPUT
+          # --------------------------------------------------------
 
-          print("Eligible rows:", eligible_rows)
+          print(
+              "Projection rows:",
+              len(projections)
+          )
 
-          print("Blocked rows:", blocked_rows)
+          print(
+              "Eligible rows:",
+              eligible_rows
+          )
 
-          print("20K distributions:", verified_20k)
+          print(
+              "Blocked rows:",
+              blocked_rows
+          )
 
-          print("Role V2 records:", role_v2)
+          print(
+              "Eligible unique players:",
+              len(
+                  eligible_player_ids
+              )
+          )
 
-          print("Matchup records:", matchups)
+          print(
+              "Blocked unique players:",
+              len(
+                  blocked_player_ids
+              )
+          )
 
-          print("Market reference lines:", market_lines)
+          print(
+              "20K distributions:",
+              verified_20k
+          )
 
-          print("JPro candidates:", len(candidates))
+          print(
+              "Role V2 records:",
+              role_v2
+          )
 
-          print("High priority:", len(high_priority))
+          print(
+              "Matchup records:",
+              matchups
+          )
 
-          print("Review:", len(review))
+          print(
+              "Market reference lines:",
+              market_lines
+          )
 
-          print("Watch:", len(watch))
+          print(
+              "JPro candidates:",
+              len(candidates)
+          )
 
-          print("Blocked candidates found: 0")
+          print(
+              "High priority:",
+              len(high_priority)
+          )
+
+          print(
+              "Review:",
+              len(review)
+          )
+
+          print(
+              "Watch:",
+              len(watch)
+          )
+
+          print(
+              "Blocked candidates found:",
+              0
+          )
 
           print("")
-
           print("=" * 72)
-
-          print("JPRO ENGINE V1.5 VERIFIED")
-
+          print(
+              "JPRO ENGINE V1.5.1 VERIFIED"
+          )
           print("=" * 72)
 
           print(
-
-              "PERMANENT AVAILABILITY ENFORCEMENT: ACTIVE"
-
+              "PERMANENT AVAILABILITY "
+              "ENFORCEMENT: ACTIVE"
           )
 
           print(
-
-              "BLOCKED PLAYERS IN JPRO PICKS: 0"
-
+              "FAIL-CLOSED STATUS "
+              "HANDLING: ACTIVE"
           )
 
           print(
+              "BLOCKED PLAYERS IN "
+              "JPRO PICKS: 0"
+          )
 
-              "20K SIMULATION DISTRIBUTIONS: PRESERVED"
-
+          print(
+              "20K SIMULATION "
+              "DISTRIBUTIONS: PRESERVED"
           )
 
           print("")
-
           print(
-
-              "Main JPro Picks Engine now requires "
-
+              "JPro Picks now requires "
               "current-player eligibility."
-
           )
 
           PY
 
       # ============================================================
-
       # SAVE
-
       # ============================================================
 
-      - name: Save JPro Engine V1.5
-
+      - name: Save JPro Engine V1.5.1
         run: |
-
           git config user.name "JPro Cloud Engine"
-
           git config user.email "actions@github.com"
 
           git add data/jpro-current-projections.json
 
           if git diff --cached --quiet; then
-
             echo "No changes to commit."
-
           else
-
-            git commit -m "Add permanent availability gate V1.5"
-
+            git commit -m "Fix permanent availability gate V1.5.1"
             git push
-
           fi
