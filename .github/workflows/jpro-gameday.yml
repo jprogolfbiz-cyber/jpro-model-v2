@@ -1,2554 +1,3695 @@
-name: JPro Gameday Engine V1 - Eagles at Bears
+name: JPro Gameday Engine V1.1 - TD Engine
 
 on:
+
   workflow_dispatch:
 
 permissions:
+
   contents: write
 
 jobs:
-  jpro-gameday:
+
+  jpro-gameday-td:
+
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Get JPro
+
         uses: actions/checkout@v4
 
       - name: Set up Python
+
         uses: actions/setup-python@v5
+
         with:
+
           python-version: "3.11"
 
-      # ============================================================
-      # JPRO GAMEDAY ENGINE V1
-      # PHILADELPHIA EAGLES @ CHICAGO BEARS
-      # SEPTEMBER 28, 2026
-      #
-      # PURPOSE
-      # -------
-      # 1. Preserve the existing JPro projection model.
-      # 2. Preserve every valid 20K simulation distribution.
-      # 3. Read the authoritative V1.5.1 availability gate.
-      # 4. Apply verified game-specific availability.
-      # 5. Set Case Keenum as Chicago's expected starter.
-      # 6. Mark projections affected by important absences.
-      # 7. Build detailed Player Analysis for every PHI/CHI prop.
-      # 8. Never fabricate sportsbook prices.
-      # 9. Never fabricate injury redistribution.
-      # 10. Fail closed when evidence is insufficient.
-      #
-      # IMPORTANT
-      # ---------
-      # This workflow DOES NOT transfer an injured player's yards
-      # to another player.
-      #
-      # That requires the separately validated redistribution model.
-      #
-      # For tonight, affected markets are explicitly identified as
-      # AVAILABILITY_SENSITIVE rather than silently adjusted.
+      - name: Install TD Engine Dependencies
+
+        run: |
+
+          python -m pip install --upgrade pip
+
+          pip install nflreadpy pandas numpy pyarrow
+
       # ============================================================
 
-      - name: Build Eagles Bears Gameday Intelligence
+      # JPRO GAMEDAY TD ENGINE V1.1
+
+      #
+
+      # PURPOSE
+
+      # -------
+
+      # Adds an independent touchdown model to the already-verified
+
+      # Eagles @ Bears Gameday Engine V1.
+
+      #
+
+      # OUTPUTS
+
+      # -------
+
+      # - Anytime TD probability
+
+      # - 2+ TD probability
+
+      # - Model fair American odds
+
+      # - TD confidence
+
+      # - Historical TD evidence
+
+      # - Role evidence
+
+      # - Availability/QB context
+
+      # - Detailed TD Player Analysis
+
+      #
+
+      # IMPORTANT
+
+      # ---------
+
+      # This is TD V1 / EXPERIMENTAL.
+
+      #
+
+      # It does NOT derive TD probability from projected yardage.
+
+      # It does NOT fabricate sportsbook prices.
+
+      # It does NOT pretend to have red-zone data that is absent.
+
+      # It does NOT alter the verified yardage/reception projections.
+
+      # ============================================================
+
+      - name: Build JPro TD Engine V1.1
+
         run: |
+
           python <<'PY'
+
           import json
+
           import math
+
           import os
-          from collections import Counter, defaultdict
+
+          import re
+
+          import unicodedata
+
+          from collections import defaultdict
+
           from datetime import datetime, timezone
+
+          import numpy as np
+
+          import pandas as pd
+
+          import nflreadpy as nfl
 
           PATH = "data/jpro-current-projections.json"
 
-          EXPECTED_SIMS = 20000
-
-          TARGET_TEAMS = {
-              "PHI",
-              "CHI"
-          }
-
-          GAME_LABEL = "PHI @ CHI"
+          TARGET_TEAMS = {"PHI", "CHI"}
 
           print("=" * 78)
-          print("JPRO GAMEDAY ENGINE V1")
-          print("PHILADELPHIA EAGLES @ CHICAGO BEARS")
+
+          print("JPRO GAMEDAY TD ENGINE V1.1")
+
+          print("EAGLES @ BEARS")
+
           print("=" * 78)
+
+          # ========================================================
+
+          # LOAD EXISTING GAMEDAY DATA
+
+          # ========================================================
 
           if not os.path.exists(PATH):
+
               raise RuntimeError(
+
                   f"Missing required file: {PATH}"
+
               )
 
-          with open(
-              PATH,
-              "r",
-              encoding="utf-8"
-          ) as f:
+          with open(PATH, "r", encoding="utf-8") as f:
+
               data = json.load(f)
 
-          projections = data.get(
-              "projections",
-              []
-          )
+          gameday_engine = data.get(
 
-          if not projections:
-              raise RuntimeError(
-                  "No projections found."
-              )
+              "jpro_gameday_engine",
 
-          # ========================================================
-          # VERIFY THE STABLE V1.5.1 FOUNDATION
-          # ========================================================
-
-          gate = data.get(
-              "jpro_availability_gate",
               {}
+
           )
 
           if (
-              gate.get("version")
-              != "JPRO_AVAILABILITY_GATE_V1.5.1"
-              or gate.get("status")
-              != "ACTIVE"
+
+              gameday_engine.get("version")
+
+              != "JPRO_GAMEDAY_ENGINE_V1"
+
+              or gameday_engine.get("status")
+
+              != "READY"
+
           ):
+
               raise RuntimeError(
-                  "JPro Availability Gate V1.5.1 "
-                  "must be active before Gameday Engine runs."
+
+                  "Verified JPro Gameday Engine V1 "
+
+                  "must be run before TD Engine V1.1."
+
+              )
+
+          projections = data.get(
+
+              "projections",
+
+              []
+
+          )
+
+          if not projections:
+
+              raise RuntimeError(
+
+                  "No projections found."
+
+              )
+
+          gameday_rows = [
+
+              p for p in projections
+
+              if isinstance(
+
+                  p.get("jpro_gameday_v1"),
+
+                  dict
+
+              )
+
+              and p["jpro_gameday_v1"].get(
+
+                  "engine"
+
+              ) == "JPRO_GAMEDAY_ENGINE_V1"
+
+          ]
+
+          if not gameday_rows:
+
+              raise RuntimeError(
+
+                  "No Gameday V1 rows found."
+
               )
 
           print(
-              "Base projection rows:",
-              len(projections)
+
+              "Verified gameday rows:",
+
+              len(gameday_rows)
+
           )
 
-          print(
-              "Availability gate:",
-              gate.get("version")
-          )
-
-          # ========================================================
-          # VERIFIED GAMEDAY CONTEXT
-          #
-          # Snapshot for September 28, 2026.
-          #
-          # These are explicit game-specific overrides.
           # ========================================================
 
-          CONFIRMED_OUT = {
-              "CHI": {
-                  "Caleb Williams": {
-                      "position": "QB",
-                      "reason": "Hamstring",
-                      "designation": "OUT"
-                  },
-                  "Noah Sewell": {
-                      "position": "LB",
-                      "reason": "Achilles",
-                      "designation": "OUT"
-                  },
-                  "Shemar Turner": {
-                      "position": "DL",
-                      "reason": "Knee",
-                      "designation": "OUT"
-                  }
-              },
-
-              "PHI": {
-                  "Dallas Goedert": {
-                      "position": "TE",
-                      "reason": "Knee",
-                      "designation": "OUT"
-                  },
-                  "Marquise Brown": {
-                      "position": "WR",
-                      "reason": "Ankle",
-                      "designation": "OUT"
-                  },
-                  "Hollywood Brown": {
-                      "position": "WR",
-                      "reason": "Ankle",
-                      "designation": "OUT"
-                  },
-                  "Fred Johnson": {
-                      "position": "T",
-                      "reason": "Knee",
-                      "designation": "OUT"
-                  }
-              }
-          }
-
-          EXPECTED_STARTING_QB = {
-              "PHI": {
-                  "player": "Jalen Hurts",
-                  "confidence": "HIGH",
-                  "context": (
-                      "Normal expected starting-quarterback "
-                      "environment."
-                  )
-              },
-
-              "CHI": {
-                  "player": "Case Keenum",
-                  "confidence": "LOWER_THAN_NORMAL",
-                  "context": (
-                      "Case Keenum is expected to start with "
-                      "Caleb Williams ruled out. Keenum has not "
-                      "thrown a regular-season pass since 2023, "
-                      "so current-role uncertainty is materially "
-                      "higher than for an established starter."
-                  )
-              }
-          }
-
-          QUESTIONABLE_CONTEXT = {
-              "CHI": {
-                  "Tyson Bagent": {
-                      "position": "QB",
-                      "context": (
-                          "Cleared concussion protocol but "
-                          "Case Keenum is expected to start."
-                      )
-                  }
-              },
-
-              "PHI": {
-                  "Jonathan Greenard": {
-                      "position": "LB",
-                      "context": "Questionable."
-                  }
-              }
-          }
-
-          FULL_PRACTICE_CONTEXT = {
-              "PHI": {
-                  "Saquon Barkley":
-                      "Finished the week as a full participant.",
-
-                  "DeVonta Smith":
-                      "Finished the week as a full participant.",
-
-                  "Tank Bigsby":
-                      "Finished the week as a full participant."
-              }
-          }
-
-          # ========================================================
           # HELPERS
+
           # ========================================================
 
-          def num(value, default=None):
+          def num(value, default=0.0):
 
               try:
+
                   value = float(value)
 
                   if (
+
                       math.isnan(value)
+
                       or math.isinf(value)
+
                   ):
+
                       return default
 
                   return value
 
               except Exception:
+
                   return default
 
+          def clamp(value, low, high):
 
-          def round_num(
-              value,
-              digits=2
-          ):
-              value = num(value)
+              return max(
 
-              if value is None:
-                  return None
+                  low,
 
-              return round(
-                  value,
-                  digits
+                  min(
+
+                      high,
+
+                      value
+
+                  )
+
               )
 
+          def normalize_name(name):
 
-          def clean_name(value):
+              if name is None:
 
-              if value is None:
                   return ""
 
-              return str(value).strip()
+              text = str(name).strip().lower()
 
+              text = unicodedata.normalize(
 
-          def upper(value):
+                  "NFKD",
 
-              if value is None:
-                  return ""
+                  text
 
-              return str(value).strip().upper()
-
-
-          def histogram_total(histogram):
-
-              if not isinstance(
-                  histogram,
-                  list
-              ):
-                  return 0
-
-              total = 0
-
-              for row in histogram:
-
-                  if (
-                      isinstance(row, list)
-                      and len(row) >= 2
-                  ):
-                      try:
-                          total += int(row[1])
-                      except Exception:
-                          pass
-
-              return total
-
-
-          def percentile_from_histogram(
-              histogram,
-              percentile
-          ):
-
-              total = histogram_total(
-                  histogram
               )
 
-              if total <= 0:
+              text = "".join(
+
+                  c for c in text
+
+                  if not unicodedata.combining(c)
+
+              )
+
+              text = re.sub(
+
+                  r"[^a-z0-9 ]",
+
+                  "",
+
+                  text
+
+              )
+
+              text = re.sub(
+
+                  r"\s+",
+
+                  " ",
+
+                  text
+
+              ).strip()
+
+              return text
+
+          def american_from_probability(p):
+
+              p = num(p)
+
+              if p <= 0 or p >= 1:
+
                   return None
 
-              target = (
-                  total
-                  * percentile
+              if p >= 0.5:
+
+                  odds = (
+
+                      -100
+
+                      * p
+
+                      / (1 - p)
+
+                  )
+
+              else:
+
+                  odds = (
+
+                      100
+
+                      * (1 - p)
+
+                      / p
+
+                  )
+
+              return int(
+
+                  round(odds)
+
               )
 
-              running = 0
+          def poisson_at_least_one(lam):
 
-              ordered = sorted(
-                  histogram,
-                  key=lambda x: float(x[0])
-              )
+              lam = max(
 
-              for row in ordered:
+                  num(lam),
 
-                  value = float(row[0])
-                  count = int(row[1])
+                  0
 
-                  running += count
-
-                  if running >= target:
-                      return value
-
-              return float(
-                  ordered[-1][0]
-              )
-
-
-          def get_percentiles(prop):
-
-              histogram = prop.get(
-                  "simulation_histogram",
-                  []
-              )
-
-              if (
-                  histogram_total(histogram)
-                  == EXPECTED_SIMS
-              ):
-                  return {
-                      "p10":
-                          percentile_from_histogram(
-                              histogram,
-                              0.10
-                          ),
-
-                      "p25":
-                          percentile_from_histogram(
-                              histogram,
-                              0.25
-                          ),
-
-                      "median":
-                          percentile_from_histogram(
-                              histogram,
-                              0.50
-                          ),
-
-                      "p75":
-                          percentile_from_histogram(
-                              histogram,
-                              0.75
-                          ),
-
-                      "p90":
-                          percentile_from_histogram(
-                              histogram,
-                              0.90
-                          )
-                  }
-
-              return {
-                  "p10":
-                      prop.get("p10"),
-
-                  "p25":
-                      prop.get("p25"),
-
-                  "median":
-                      prop.get("median"),
-
-                  "p75":
-                      prop.get("p75"),
-
-                  "p90":
-                      prop.get("p90")
-              }
-
-
-          def availability_v151(prop):
-
-              obj = prop.get(
-                  "jpro_availability_v151",
-                  {}
-              )
-
-              if not isinstance(
-                  obj,
-                  dict
-              ):
-                  return {}
-
-              return obj
-
-
-          def base_eligible(prop):
-
-              obj = availability_v151(
-                  prop
               )
 
               return (
-                  obj.get("eligible")
-                  is True
-                  and obj.get(
-                      "gate_version"
-                  )
-                  == "JPRO_AVAILABILITY_GATE_V1.5.1"
+
+                  1
+
+                  - math.exp(-lam)
+
               )
 
+          def poisson_two_plus(lam):
 
-          def get_role(prop):
+              lam = max(
 
-              role = prop.get(
-                  "role",
-                  {}
+                  num(lam),
+
+                  0
+
               )
 
-              if not isinstance(
-                  role,
-                  dict
-              ):
-                  role = {}
+              return (
 
-              return role
+                  1
 
+                  - math.exp(-lam)
 
-          def get_matchup(prop):
+                  * (1 + lam)
 
-              matchup = prop.get(
-                  "matchup",
-                  {}
               )
 
-              if not isinstance(
-                  matchup,
-                  dict
-              ):
-                  matchup = {}
+          def safe_mean(values):
 
-              return matchup
+              values = [
 
+                  num(x, None)
 
-          def get_market(prop):
+                  for x in values
 
-              market = prop.get(
-                  "market",
-                  {}
+              ]
+
+              values = [
+
+                  x for x in values
+
+                  if x is not None
+
+              ]
+
+              if not values:
+
+                  return 0.0
+
+              return float(
+
+                  np.mean(values)
+
               )
 
-              if not isinstance(
-                  market,
-                  dict
-              ):
-                  market = {}
+          # ========================================================
 
-              return market
+          # LOAD HISTORICAL NFL PLAYER DATA
 
+          # ========================================================
 
-          def find_out_info(
-              team,
-              player
-          ):
+          print("")
 
-              team_map = CONFIRMED_OUT.get(
-                  team,
-                  {}
-              )
+          print("=" * 78)
 
-              if player in team_map:
-                  return team_map[player]
+          print("LOADING HISTORICAL TOUCHDOWN DATA")
 
-              player_lower = player.lower()
+          print("=" * 78)
 
-              for name, info in team_map.items():
+          seasons = [
 
-                  if (
-                      name.lower()
-                      == player_lower
-                  ):
-                      return info
+              2022,
+
+              2023,
+
+              2024,
+
+              2025,
+
+              2026
+
+          ]
+
+          raw = nfl.load_player_stats(
+
+              seasons
+
+          )
+
+          try:
+
+              stats = raw.to_pandas()
+
+          except Exception:
+
+              stats = pd.DataFrame(raw)
+
+          print(
+
+              "Historical rows:",
+
+              len(stats)
+
+          )
+
+          print(
+
+              "Columns:",
+
+              len(stats.columns)
+
+          )
+
+          # ========================================================
+
+          # FIELD DISCOVERY
+
+          # ========================================================
+
+          name_candidates = [
+
+              "player_display_name",
+
+              "player_name",
+
+              "player",
+
+              "name"
+
+          ]
+
+          team_candidates = [
+
+              "recent_team",
+
+              "team",
+
+              "posteam"
+
+          ]
+
+          position_candidates = [
+
+              "position",
+
+              "position_group"
+
+          ]
+
+          season_candidates = [
+
+              "season"
+
+          ]
+
+          week_candidates = [
+
+              "week"
+
+          ]
+
+          rush_td_candidates = [
+
+              "rushing_tds",
+
+              "rush_tds",
+
+              "rushing_td"
+
+          ]
+
+          rec_td_candidates = [
+
+              "receiving_tds",
+
+              "rec_tds",
+
+              "receiving_td"
+
+          ]
+
+          target_candidates = [
+
+              "targets"
+
+          ]
+
+          carry_candidates = [
+
+              "carries",
+
+              "rushing_attempts"
+
+          ]
+
+          reception_candidates = [
+
+              "receptions"
+
+          ]
+
+          receiving_yards_candidates = [
+
+              "receiving_yards"
+
+          ]
+
+          rushing_yards_candidates = [
+
+              "rushing_yards"
+
+          ]
+
+          def find_column(candidates):
+
+              for key in candidates:
+
+                  if key in stats.columns:
+
+                      return key
 
               return None
 
+          NAME_COL = find_column(
 
-          def find_practice_context(
-              team,
-              player
-          ):
+              name_candidates
 
-              return (
-                  FULL_PRACTICE_CONTEXT
-                  .get(team, {})
-                  .get(player)
-              )
-
-
-          # ========================================================
-          # ABSENCE SENSITIVITY
-          #
-          # IMPORTANT:
-          # This identifies WHERE uncertainty exists.
-          #
-          # It DOES NOT fabricate redistribution.
-          # ========================================================
-
-          def absence_effects(
-              team,
-              position,
-              prop_name,
-              player
-          ):
-
-              effects = []
-
-              prop_lower = (
-                  str(prop_name)
-                  .lower()
-              )
-
-              # ----------------------------------------------------
-              # CHICAGO
-              # Caleb Williams OUT / Case Keenum expected starter
-              # ----------------------------------------------------
-
-              if team == "CHI":
-
-                  if player == "Case Keenum":
-
-                      effects.append({
-                          "type":
-                              "STARTING_QB_CHANGE",
-
-                          "severity":
-                              "HIGH",
-
-                          "description":
-                              (
-                                  "Case Keenum is expected to "
-                                  "start in place of Caleb Williams."
-                              )
-                      })
-
-                  elif position in {
-                      "WR",
-                      "TE",
-                      "RB"
-                  }:
-
-                      if (
-                          "receiv" in prop_lower
-                          or "reception" in prop_lower
-                      ):
-                          effects.append({
-                              "type":
-                                  "STARTING_QB_CHANGE",
-
-                              "severity":
-                                  "HIGH",
-
-                              "description":
-                                  (
-                                      "Chicago receiving production "
-                                      "is sensitive to the change "
-                                      "from Caleb Williams to expected "
-                                      "starter Case Keenum."
-                                  )
-                          })
-
-                      elif (
-                          position == "RB"
-                          and "rush" in prop_lower
-                      ):
-                          effects.append({
-                              "type":
-                                  "GAMEPLAN_CHANGE",
-
-                              "severity":
-                                  "MODERATE",
-
-                              "description":
-                                  (
-                                      "Chicago's rushing workload "
-                                      "could change with Case Keenum "
-                                      "expected to start."
-                                  )
-                          })
-
-              # ----------------------------------------------------
-              # PHILADELPHIA
-              # Goedert + Brown OUT
-              # ----------------------------------------------------
-
-              if team == "PHI":
-
-                  if (
-                      position in {
-                          "WR",
-                          "TE",
-                          "RB"
-                      }
-                      and (
-                          "receiv" in prop_lower
-                          or "reception" in prop_lower
-                      )
-                  ):
-
-                      effects.append({
-                          "type":
-                              "TEAMMATE_RECEIVING_ABSENCE",
-
-                          "severity":
-                              "MODERATE",
-
-                          "description":
-                              (
-                                  "Dallas Goedert and Marquise "
-                                  "Brown are out. Their unavailable "
-                                  "receiving opportunity may change "
-                                  "the target distribution among "
-                                  "remaining Philadelphia players."
-                              )
-                      })
-
-                  if (
-                      position == "QB"
-                      and (
-                          "pass" in prop_lower
-                          or "passing" in prop_lower
-                      )
-                  ):
-
-                      effects.append({
-                          "type":
-                              "PASS_CATCHER_AVAILABILITY",
-
-                          "severity":
-                              "MODERATE",
-
-                          "description":
-                              (
-                                  "Jalen Hurts is operating without "
-                                  "Dallas Goedert and Marquise Brown, "
-                                  "which changes his available "
-                                  "pass-catcher group."
-                              )
-                      })
-
-                  if (
-                      "rush" in prop_lower
-                      and player == "Saquon Barkley"
-                  ):
-
-                      effects.append({
-                          "type":
-                              "OFFENSIVE_LINE_AVAILABILITY",
-
-                          "severity":
-                              "LOW_TO_MODERATE",
-
-                          "description":
-                              (
-                                  "Philadelphia tackle Fred Johnson "
-                                  "is out. Offensive-line availability "
-                                  "is relevant context for rushing "
-                                  "efficiency."
-                              )
-                      })
-
-              return effects
-
-
-          # ========================================================
-          # PROJECTION CONFIDENCE
-          #
-          # This is an evidence-quality label.
-          # It is NOT a calibrated probability that the projection
-          # will be correct.
-          # ========================================================
-
-          def confidence_analysis(
-              prop,
-              effects
-          ):
-
-              role = get_role(prop)
-
-              score = 80
-
-              reasons = []
-
-              current_games = num(
-                  role.get(
-                      "current_games"
-                  ),
-                  0
-              )
-
-              if current_games <= 2:
-
-                  score -= 10
-
-                  reasons.append(
-                      "Limited current-season sample."
-                  )
-
-              if effects:
-
-                  high_effect = any(
-                      e.get("severity") == "HIGH"
-                      for e in effects
-                  )
-
-                  moderate_effect = any(
-                      e.get("severity")
-                      in {
-                          "MODERATE",
-                          "LOW_TO_MODERATE"
-                      }
-                      for e in effects
-                  )
-
-                  if high_effect:
-                      score -= 25
-
-                  elif moderate_effect:
-                      score -= 12
-
-                  reasons.append(
-                      "Gameday availability changes "
-                      "increase projection uncertainty."
-                  )
-
-              player = clean_name(
-                  prop.get("player")
-              )
-
-              if player == "Case Keenum":
-
-                  score = min(
-                      score,
-                      35
-                  )
-
-                  reasons.append(
-                      "Expected starting quarterback "
-                      "has no regular-season passing "
-                      "attempt since 2023."
-                  )
-
-              histogram = prop.get(
-                  "simulation_histogram",
-                  []
-              )
-
-              if (
-                  histogram_total(histogram)
-                  != EXPECTED_SIMS
-              ):
-
-                  score -= 30
-
-                  reasons.append(
-                      "Valid 20K simulation distribution "
-                      "is unavailable."
-                  )
-
-              score = max(
-                  0,
-                  min(
-                      100,
-                      score
-                  )
-              )
-
-              if score >= 75:
-                  label = "HIGHER"
-
-              elif score >= 55:
-                  label = "MODERATE"
-
-              elif score >= 35:
-                  label = "LOWER"
-
-              else:
-                  label = "INSUFFICIENT"
-
-              if not reasons:
-                  reasons.append(
-                      "Existing model inputs and 20K "
-                      "distribution are available."
-                  )
-
-              return {
-                  "score":
-                      score,
-
-                  "label":
-                      label,
-
-                  "meaning":
-                      (
-                          "Evidence-quality indicator only; "
-                          "not a calibrated probability of "
-                          "projection accuracy."
-                      ),
-
-                  "reasons":
-                      reasons
-              }
-
-
-          # ========================================================
-          # PLAYER ANALYSIS BUILDER
-          # ========================================================
-
-          def build_player_analysis(
-              prop,
-              effects,
-              gameday_eligible
-          ):
-
-              player = clean_name(
-                  prop.get("player")
-              )
-
-              team = upper(
-                  prop.get("team")
-              )
-
-              opponent = upper(
-                  prop.get("opponent")
-              )
-
-              position = upper(
-                  prop.get("position")
-              )
-
-              prop_name = str(
-                  prop.get("prop")
-                  or ""
-              )
-
-              role = get_role(prop)
-              matchup = get_matchup(prop)
-              market = get_market(prop)
-
-              percentiles = get_percentiles(
-                  prop
-              )
-
-              projection = round_num(
-                  prop.get("projection")
-              )
-
-              confidence = confidence_analysis(
-                  prop,
-                  effects
-              )
-
-              base_availability = (
-                  availability_v151(prop)
-              )
-
-              practice_context = (
-                  find_practice_context(
-                      team,
-                      player
-                  )
-              )
-
-              # ----------------------------------------------------
-              # ROLE INPUTS
-              # ----------------------------------------------------
-
-              role_inputs = {}
-
-              interesting_role_keys = [
-                  "role_score",
-                  "role_label",
-                  "role_method",
-                  "prior_games",
-                  "current_games",
-                  "prior_weight",
-                  "current_weight",
-                  "prior_targets",
-                  "current_targets",
-                  "blended_targets",
-                  "prior_carries",
-                  "current_carries",
-                  "blended_carries",
-                  "target_share",
-                  "air_yards_share",
-                  "current_target_share",
-                  "current_air_yards_share",
-                  "prior_target_share",
-                  "prior_air_yards_share",
-                  "blended_target_share",
-                  "blended_air_yards_share"
-              ]
-
-              for key in interesting_role_keys:
-
-                  if (
-                      key in role
-                      and role.get(key)
-                      is not None
-                  ):
-                      role_inputs[key] = role.get(
-                          key
-                      )
-
-              # ----------------------------------------------------
-              # MATCHUP INPUTS
-              # ----------------------------------------------------
-
-              matchup_inputs = {}
-
-              interesting_matchup_keys = [
-                  "matchup_score",
-                  "matchup_label",
-                  "allowed",
-                  "league",
-                  "ratio",
-                  "current_games",
-                  "historical_games",
-                  "current_allowed",
-                  "historical_allowed",
-                  "league_average"
-              ]
-
-              for key in interesting_matchup_keys:
-
-                  if (
-                      key in matchup
-                      and matchup.get(key)
-                      is not None
-                  ):
-                      matchup_inputs[key] = matchup.get(
-                          key
-                      )
-
-              # Preserve additional matchup evidence if structure
-              # uses slightly different field names.
-
-              for key, value in matchup.items():
-
-                  key_lower = str(key).lower()
-
-                  if (
-                      key not in matchup_inputs
-                      and any(
-                          token in key_lower
-                          for token in [
-                              "allow",
-                              "league",
-                              "ratio",
-                              "game",
-                              "score",
-                              "label"
-                          ]
-                      )
-                  ):
-                      matchup_inputs[key] = value
-
-              # ----------------------------------------------------
-              # EXPLANATION
-              # ----------------------------------------------------
-
-              explanation = []
-
-              if projection is not None:
-
-                  explanation.append(
-                      (
-                          f"JPro's baseline model projects "
-                          f"{player} at {projection} for "
-                          f"{prop_name}."
-                      )
-                  )
-
-              role_label = role.get(
-                  "role_label",
-                  "UNKNOWN"
-              )
-
-              role_score = round_num(
-                  role.get("role_score")
-              )
-
-              if role_score is not None:
-
-                  explanation.append(
-                      (
-                          f"Expected opportunity is classified "
-                          f"{role_label} with a Role V2 score "
-                          f"of {role_score}."
-                      )
-                  )
-
-              matchup_label = matchup.get(
-                  "matchup_label",
-                  "NEUTRAL"
-              )
-
-              matchup_score = round_num(
-                  matchup.get(
-                      "matchup_score"
-                  )
-              )
-
-              if matchup_score is not None:
-
-                  explanation.append(
-                      (
-                          f"Opponent production matchup is "
-                          f"{matchup_label} with a matchup "
-                          f"score of {matchup_score}."
-                      )
-                  )
-
-              if (
-                  histogram_total(
-                      prop.get(
-                          "simulation_histogram",
-                          []
-                      )
-                  )
-                  == EXPECTED_SIMS
-              ):
-
-                  explanation.append(
-                      (
-                          "The uncertainty range comes from "
-                          "20,000 simulated outcomes rather "
-                          "than a single deterministic number."
-                      )
-                  )
-
-              if effects:
-
-                  for effect in effects:
-                      explanation.append(
-                          effect.get(
-                              "description"
-                          )
-                      )
-
-                  explanation.append(
-                      (
-                          "JPro Gameday V1 does not fabricate "
-                          "a workload redistribution percentage. "
-                          "Because the relevant teammate/QB "
-                          "situation changed, this projection is "
-                          "flagged for additional market review."
-                      )
-                  )
-
-              if practice_context:
-
-                  explanation.append(
-                      practice_context
-                  )
-
-              if not gameday_eligible:
-
-                  explanation.append(
-                      (
-                          "This player is not eligible for "
-                          "tonight's JPro market analysis."
-                      )
-                  )
-
-              # ----------------------------------------------------
-              # DATA SOURCES / MODEL INPUT CATEGORIES
-              # ----------------------------------------------------
-
-              data_used = [
-                  "nflverse historical player statistics",
-                  "lagged player production features",
-                  "recent rolling production",
-                  "Role V2 opportunity blend",
-                  "opponent production matchup intelligence",
-                  "V1.5.1 current-player availability gate",
-                  "20,000-outcome empirical simulation distribution"
-              ]
-
-              if effects:
-                  data_used.append(
-                      "verified gameday availability context"
-                  )
-
-              # ----------------------------------------------------
-              # RISKS
-              # ----------------------------------------------------
-
-              risks = []
-
-              if effects:
-
-                  risks.append(
-                      (
-                          "Tonight's personnel situation differs "
-                          "from the baseline model environment."
-                      )
-                  )
-
-              if player == "Case Keenum":
-
-                  risks.append(
-                      (
-                          "Keenum's lack of recent regular-season "
-                          "playing data materially increases "
-                          "uncertainty."
-                      )
-                  )
-
-              if team == "CHI":
-
-                  if position in {
-                      "WR",
-                      "TE",
-                      "RB"
-                  }:
-
-                      risks.append(
-                          (
-                              "Chicago skill-player usage and "
-                              "efficiency may change with "
-                              "Case Keenum expected to start."
-                          )
-                      )
-
-              if team == "PHI":
-
-                  if position in {
-                      "WR",
-                      "TE",
-                      "RB",
-                      "QB"
-                  }:
-
-                      risks.append(
-                          (
-                              "Philadelphia's offensive distribution "
-                              "may change with Dallas Goedert and "
-                              "Marquise Brown unavailable."
-                          )
-                      )
-
-              if not risks:
-
-                  risks.append(
-                      (
-                          "Normal football variance, game script, "
-                          "usage changes and late news remain risks."
-                      )
-                  )
-
-              # ----------------------------------------------------
-              # MARKET READINESS
-              # ----------------------------------------------------
-
-              if not gameday_eligible:
-
-                  readiness = (
-                      "NO_PLAY_UNAVAILABLE"
-                  )
-
-              elif (
-                  histogram_total(
-                      prop.get(
-                          "simulation_histogram",
-                          []
-                      )
-                  )
-                  != EXPECTED_SIMS
-              ):
-
-                  readiness = (
-                      "INSUFFICIENT_SIMULATION_DATA"
-                  )
-
-              elif (
-                  confidence["label"]
-                  in {
-                      "INSUFFICIENT"
-                  }
-              ):
-
-                  readiness = (
-                      "INSUFFICIENT_GAMEDAY_EVIDENCE"
-                  )
-
-              elif effects:
-
-                  readiness = (
-                      "REVIEW_AVAILABILITY_SENSITIVE"
-                  )
-
-              else:
-
-                  readiness = (
-                      "MODEL_READY"
-                  )
-
-              return {
-                  "version":
-                      "JPRO_PLAYER_ANALYSIS_GAMEDAY_V1",
-
-                  "player":
-                      player,
-
-                  "team":
-                      team,
-
-                  "opponent":
-                      opponent,
-
-                  "position":
-                      position,
-
-                  "prop":
-                      prop_name,
-
-                  "baseline_projection":
-                      projection,
-
-                  "gameday_projection":
-                      projection,
-
-                  "projection_adjusted":
-                      False,
-
-                  "adjustment_reason":
-                      (
-                          "No unvalidated injury redistribution "
-                          "multiplier applied."
-                      ),
-
-                  "simulation_count":
-                      histogram_total(
-                          prop.get(
-                              "simulation_histogram",
-                              []
-                          )
-                      ),
-
-                  "distribution": {
-                      "p10":
-                          round_num(
-                              percentiles.get("p10")
-                          ),
-
-                      "p25":
-                          round_num(
-                              percentiles.get("p25")
-                          ),
-
-                      "median":
-                          round_num(
-                              percentiles.get("median")
-                          ),
-
-                      "p75":
-                          round_num(
-                              percentiles.get("p75")
-                          ),
-
-                      "p90":
-                          round_num(
-                              percentiles.get("p90")
-                          )
-                  },
-
-                  "expected_role": {
-                      "label":
-                          role_label,
-
-                      "score":
-                          role_score,
-
-                      "method":
-                          role.get(
-                              "role_method"
-                          ),
-
-                      "inputs":
-                          role_inputs
-                  },
-
-                  "matchup_intelligence": {
-                      "label":
-                          matchup_label,
-
-                      "score":
-                          matchup_score,
-
-                      "inputs":
-                          matchup_inputs
-                  },
-
-                  "availability": {
-                      "base_v151":
-                          base_availability,
-
-                      "gameday_eligible":
-                          bool(
-                              gameday_eligible
-                          ),
-
-                      "practice_context":
-                          practice_context,
-
-                      "effects":
-                          effects
-                  },
-
-                  "quarterback_context":
-                      EXPECTED_STARTING_QB.get(
-                          team
-                      ),
-
-                  "projection_confidence":
-                      confidence,
-
-                  "market_reference": {
-                      "model_reference_line":
-                          market.get(
-                              "model_reference_line"
-                          ),
-
-                      "reference_lean":
-                          market.get(
-                              "model_reference_lean"
-                          ),
-
-                      "reference_probability":
-                          market.get(
-                              "model_reference_probability"
-                          ),
-
-                      "sportsbook_line":
-                          None,
-
-                      "sportsbook_odds":
-                          None
-                  },
-
-                  "why_jpro_projects_this":
-                      explanation,
-
-                  "data_used":
-                      data_used,
-
-                  "risk_factors":
-                      risks,
-
-                  "market_readiness":
-                      readiness,
-
-                  "important_note":
-                      (
-                          "Projection confidence describes evidence "
-                          "quality, not certainty. A sportsbook line "
-                          "and price must still be compared against "
-                          "the model distribution."
-                      )
-              }
-
-
-          # ========================================================
-          # IDENTIFY TONIGHT'S PLAYER UNIVERSE
-          # ========================================================
-
-          gameday_rows = []
-
-          gameday_players = set()
-
-          blocked_by_verified_out = set()
-
-          availability_sensitive_rows = 0
-
-          model_ready_rows = 0
-
-          review_rows = 0
-
-          insufficient_rows = 0
-
-          readiness_counts = Counter()
-
-          team_counts = Counter()
-
-          position_counts = Counter()
-
-          # ========================================================
-          # APPLY GAMEDAY LAYER
-          # ========================================================
-
-          for prop in projections:
-
-              team = upper(
-                  prop.get("team")
-              )
-
-              opponent = upper(
-                  prop.get("opponent")
-              )
-
-              if (
-                  team not in TARGET_TEAMS
-              ):
-                  continue
-
-              # Make sure this is actually PHI/CHI context.
-              if (
-                  opponent
-                  and opponent not in TARGET_TEAMS
-              ):
-                  continue
-
-              player = clean_name(
-                  prop.get("player")
-              )
-
-              position = upper(
-                  prop.get("position")
-              )
-
-              prop_name = str(
-                  prop.get("prop")
-                  or ""
-              )
-
-              gameday_players.add(
-                  (
-                      team,
-                      player
-                  )
-              )
-
-              team_counts[team] += 1
-
-              position_counts[
-                  position or "UNKNOWN"
-              ] += 1
-
-              base_ok = base_eligible(
-                  prop
-              )
-
-              verified_out_info = (
-                  find_out_info(
-                      team,
-                      player
-                  )
-              )
-
-              verified_out = (
-                  verified_out_info
-                  is not None
-              )
-
-              if verified_out:
-
-                  gameday_eligible = False
-
-                  blocked_by_verified_out.add(
-                      (
-                          team,
-                          player
-                      )
-                  )
-
-              else:
-
-                  gameday_eligible = bool(
-                      base_ok
-                  )
-
-              effects = absence_effects(
-                  team,
-                  position,
-                  prop_name,
-                  player
-              )
-
-              analysis = build_player_analysis(
-                  prop,
-                  effects,
-                  gameday_eligible
-              )
-
-              readiness = analysis.get(
-                  "market_readiness"
-              )
-
-              readiness_counts[
-                  readiness
-              ] += 1
-
-              if readiness == "MODEL_READY":
-                  model_ready_rows += 1
-
-              elif (
-                  readiness
-                  == "REVIEW_AVAILABILITY_SENSITIVE"
-              ):
-                  review_rows += 1
-
-              else:
-                  insufficient_rows += 1
-
-              if effects:
-                  availability_sensitive_rows += 1
-
-              # ----------------------------------------------------
-              # GAMEDAY OBJECT
-              # ----------------------------------------------------
-
-              prop[
-                  "jpro_gameday_v1"
-              ] = {
-                  "game":
-                      GAME_LABEL,
-
-                  "engine":
-                      "JPRO_GAMEDAY_ENGINE_V1",
-
-                  "base_v151_eligible":
-                      bool(base_ok),
-
-                  "verified_out":
-                      bool(verified_out),
-
-                  "verified_out_info":
-                      verified_out_info,
-
-                  "gameday_eligible":
-                      bool(gameday_eligible),
-
-                  "availability_sensitive":
-                      bool(effects),
-
-                  "availability_effects":
-                      effects,
-
-                  "market_readiness":
-                      readiness,
-
-                  "projection_adjusted":
-                      False,
-
-                  "baseline_projection":
-                      round_num(
-                          prop.get(
-                              "projection"
-                          )
-                      ),
-
-                  "gameday_projection":
-                      round_num(
-                          prop.get(
-                              "projection"
-                          )
-                      ),
-
-                  "simulation_count":
-                      histogram_total(
-                          prop.get(
-                              "simulation_histogram",
-                              []
-                          )
-                      ),
-
-                  "starting_qb_context":
-                      EXPECTED_STARTING_QB.get(
-                          team
-                      )
-              }
-
-              # Detailed player explanation.
-              prop[
-                  "player_analysis"
-              ] = analysis
-
-              prop[
-                  "player_analysis_v1"
-              ] = analysis
-
-              # ----------------------------------------------------
-              # REMOVE PICKS ANALYSIS FROM VERIFIED OUT PLAYERS
-              # ----------------------------------------------------
-
-              if not gameday_eligible:
-
-                  prop.pop(
-                      "picks_analysis",
-                      None
-                  )
-
-              gameday_rows.append(
-                  prop
-              )
-
-          if not gameday_rows:
-
-              raise RuntimeError(
-                  "No PHI/CHI projections were found."
-              )
-
-          # ========================================================
-          # CASE KEENUM CHECK
-          # ========================================================
-
-          keenum_rows = [
-              p
-              for p in gameday_rows
-              if clean_name(
-                  p.get("player")
-              ) == "Case Keenum"
-          ]
-
-          keenum_projection_available = (
-              len(keenum_rows) > 0
           )
 
-          if keenum_projection_available:
+          TEAM_COL = find_column(
 
-              for prop in keenum_rows:
+              team_candidates
 
-                  prop[
-                      "jpro_gameday_v1"
-                  ][
-                      "expected_starting_qb"
-                  ] = True
+          )
 
-                  prop[
-                      "jpro_gameday_v1"
-                  ][
-                      "special_uncertainty"
-                  ] = (
-                      "HIGHER_THAN_NORMAL"
+          POSITION_COL = find_column(
+
+              position_candidates
+
+          )
+
+          SEASON_COL = find_column(
+
+              season_candidates
+
+          )
+
+          WEEK_COL = find_column(
+
+              week_candidates
+
+          )
+
+          RUSH_TD_COL = find_column(
+
+              rush_td_candidates
+
+          )
+
+          REC_TD_COL = find_column(
+
+              rec_td_candidates
+
+          )
+
+          TARGET_COL = find_column(
+
+              target_candidates
+
+          )
+
+          CARRY_COL = find_column(
+
+              carry_candidates
+
+          )
+
+          RECEPTION_COL = find_column(
+
+              reception_candidates
+
+          )
+
+          REC_YARDS_COL = find_column(
+
+              receiving_yards_candidates
+
+          )
+
+          RUSH_YARDS_COL = find_column(
+
+              rushing_yards_candidates
+
+          )
+
+          print(
+
+              "Name column:",
+
+              NAME_COL
+
+          )
+
+          print(
+
+              "Team column:",
+
+              TEAM_COL
+
+          )
+
+          print(
+
+              "Position column:",
+
+              POSITION_COL
+
+          )
+
+          print(
+
+              "Rushing TD column:",
+
+              RUSH_TD_COL
+
+          )
+
+          print(
+
+              "Receiving TD column:",
+
+              REC_TD_COL
+
+          )
+
+          if NAME_COL is None:
+
+              raise RuntimeError(
+
+                  "Player name column not found."
+
+              )
+
+          if SEASON_COL is None:
+
+              raise RuntimeError(
+
+                  "Season column not found."
+
+              )
+
+          if (
+
+              RUSH_TD_COL is None
+
+              and REC_TD_COL is None
+
+          ):
+
+              raise RuntimeError(
+
+                  "No rushing or receiving "
+
+                  "touchdown fields found."
+
+              )
+
+          # ========================================================
+
+          # NORMALIZE HISTORICAL DATA
+
+          # ========================================================
+
+          stats = stats.copy()
+
+          stats["_name_key"] = (
+
+              stats[NAME_COL]
+
+              .fillna("")
+
+              .map(normalize_name)
+
+          )
+
+          stats["_season"] = (
+
+              pd.to_numeric(
+
+                  stats[SEASON_COL],
+
+                  errors="coerce"
+
+              )
+
+              .fillna(0)
+
+              .astype(int)
+
+          )
+
+          if WEEK_COL:
+
+              stats["_week"] = (
+
+                  pd.to_numeric(
+
+                      stats[WEEK_COL],
+
+                      errors="coerce"
+
                   )
 
-          # ========================================================
-          # BUILD TONIGHT-SPECIFIC GAMEDAY BOARD
+                  .fillna(0)
+
+                  .astype(int)
+
+              )
+
+          else:
+
+              stats["_week"] = 0
+
+          if RUSH_TD_COL:
+
+              stats["_rush_td"] = (
+
+                  pd.to_numeric(
+
+                      stats[RUSH_TD_COL],
+
+                      errors="coerce"
+
+                  )
+
+                  .fillna(0)
+
+              )
+
+          else:
+
+              stats["_rush_td"] = 0.0
+
+          if REC_TD_COL:
+
+              stats["_rec_td"] = (
+
+                  pd.to_numeric(
+
+                      stats[REC_TD_COL],
+
+                      errors="coerce"
+
+                  )
+
+                  .fillna(0)
+
+              )
+
+          else:
+
+              stats["_rec_td"] = 0.0
+
+          stats["_total_td"] = (
+
+              stats["_rush_td"]
+
+              + stats["_rec_td"]
+
+          )
+
+          stats["_scored_td"] = (
+
+              stats["_total_td"] >= 1
+
+          ).astype(int)
+
+          stats["_scored_2plus"] = (
+
+              stats["_total_td"] >= 2
+
+          ).astype(int)
+
           # ========================================================
 
-          gameday_board = []
+          # PRE-WEEK-3 CUTOFF
+
+          #
+
+          # Do not train tonight using Week 3 results.
+
+          # ========================================================
+
+          historical = stats[
+
+              (
+
+                  stats["_season"] < 2026
+
+              )
+
+              |
+
+              (
+
+                  (
+
+                      stats["_season"] == 2026
+
+                  )
+
+                  &
+
+                  (
+
+                      stats["_week"] < 3
+
+                  )
+
+              )
+
+          ].copy()
+
+          print(
+
+              "Pre-Week-3 rows:",
+
+              len(historical)
+
+          )
+
+          # ========================================================
+
+          # BUILD PLAYER TD PROFILES
+
+          # ========================================================
+
+          profiles = {}
+
+          grouped = historical.groupby(
+
+              "_name_key",
+
+              dropna=False
+
+          )
+
+          for name_key, group in grouped:
+
+              if not name_key:
+
+                  continue
+
+              group = group.sort_values(
+
+                  [
+
+                      "_season",
+
+                      "_week"
+
+                  ]
+
+              )
+
+              career_games = len(group)
+
+              if career_games == 0:
+
+                  continue
+
+              career_td = float(
+
+                  group["_total_td"].sum()
+
+              )
+
+              career_td_games = int(
+
+                  group["_scored_td"].sum()
+
+              )
+
+              career_2plus_games = int(
+
+                  group["_scored_2plus"].sum()
+
+              )
+
+              # ----------------------------------------------------
+
+              # PRIOR SEASON
+
+              # ----------------------------------------------------
+
+              prior = group[
+
+                  group["_season"] == 2025
+
+              ]
+
+              prior_games = len(prior)
+
+              prior_td = float(
+
+                  prior["_total_td"].sum()
+
+              )
+
+              prior_td_rate = (
+
+                  prior_td / prior_games
+
+                  if prior_games > 0
+
+                  else 0.0
+
+              )
+
+              prior_score_rate = (
+
+                  float(
+
+                      prior["_scored_td"].mean()
+
+                  )
+
+                  if prior_games > 0
+
+                  else 0.0
+
+              )
+
+              # ----------------------------------------------------
+
+              # CURRENT SEASON
+
+              # ----------------------------------------------------
+
+              current = group[
+
+                  (
+
+                      group["_season"] == 2026
+
+                  )
+
+                  &
+
+                  (
+
+                      group["_week"] < 3
+
+                  )
+
+              ]
+
+              current_games = len(
+
+                  current
+
+              )
+
+              current_td = float(
+
+                  current["_total_td"].sum()
+
+              )
+
+              current_td_rate = (
+
+                  current_td / current_games
+
+                  if current_games > 0
+
+                  else 0.0
+
+              )
+
+              current_score_rate = (
+
+                  float(
+
+                      current["_scored_td"].mean()
+
+                  )
+
+                  if current_games > 0
+
+                  else 0.0
+
+              )
+
+              # ----------------------------------------------------
+
+              # RECENT GAMES
+
+              # ----------------------------------------------------
+
+              recent = group.tail(8)
+
+              recent_games = len(
+
+                  recent
+
+              )
+
+              recent_td_rate = (
+
+                  float(
+
+                      recent["_total_td"].mean()
+
+                  )
+
+                  if recent_games > 0
+
+                  else 0.0
+
+              )
+
+              recent_score_rate = (
+
+                  float(
+
+                      recent["_scored_td"].mean()
+
+                  )
+
+                  if recent_games > 0
+
+                  else 0.0
+
+              )
+
+              # ----------------------------------------------------
+
+              # OPPORTUNITY DATA
+
+              # ----------------------------------------------------
+
+              avg_targets = 0.0
+
+              avg_carries = 0.0
+
+              avg_receptions = 0.0
+
+              if TARGET_COL:
+
+                  avg_targets = safe_mean(
+
+                      recent[
+
+                          TARGET_COL
+
+                      ].tolist()
+
+                  )
+
+              if CARRY_COL:
+
+                  avg_carries = safe_mean(
+
+                      recent[
+
+                          CARRY_COL
+
+                      ].tolist()
+
+                  )
+
+              if RECEPTION_COL:
+
+                  avg_receptions = safe_mean(
+
+                      recent[
+
+                          RECEPTION_COL
+
+                      ].tolist()
+
+                  )
+
+              # ----------------------------------------------------
+
+              # POSITION
+
+              # ----------------------------------------------------
+
+              position = None
+
+              if POSITION_COL:
+
+                  non_null = (
+
+                      group[
+
+                          POSITION_COL
+
+                      ]
+
+                      .dropna()
+
+                  )
+
+                  if len(non_null):
+
+                      position = str(
+
+                          non_null.iloc[-1]
+
+                      )
+
+              profiles[name_key] = {
+
+                  "career_games":
+
+                      career_games,
+
+                  "career_touchdowns":
+
+                      round(
+
+                          career_td,
+
+                          2
+
+                      ),
+
+                  "career_td_games":
+
+                      career_td_games,
+
+                  "career_2plus_games":
+
+                      career_2plus_games,
+
+                  "career_td_per_game":
+
+                      round(
+
+                          career_td
+
+                          / career_games,
+
+                          4
+
+                      ),
+
+                  "career_score_rate":
+
+                      round(
+
+                          career_td_games
+
+                          / career_games,
+
+                          4
+
+                      ),
+
+                  "career_2plus_rate":
+
+                      round(
+
+                          career_2plus_games
+
+                          / career_games,
+
+                          4
+
+                      ),
+
+                  "prior_games":
+
+                      prior_games,
+
+                  "prior_td_rate":
+
+                      round(
+
+                          prior_td_rate,
+
+                          4
+
+                      ),
+
+                  "prior_score_rate":
+
+                      round(
+
+                          prior_score_rate,
+
+                          4
+
+                      ),
+
+                  "current_games":
+
+                      current_games,
+
+                  "current_td_rate":
+
+                      round(
+
+                          current_td_rate,
+
+                          4
+
+                      ),
+
+                  "current_score_rate":
+
+                      round(
+
+                          current_score_rate,
+
+                          4
+
+                      ),
+
+                  "recent_games":
+
+                      recent_games,
+
+                  "recent_td_rate":
+
+                      round(
+
+                          recent_td_rate,
+
+                          4
+
+                      ),
+
+                  "recent_score_rate":
+
+                      round(
+
+                          recent_score_rate,
+
+                          4
+
+                      ),
+
+                  "recent_avg_targets":
+
+                      round(
+
+                          avg_targets,
+
+                          2
+
+                      ),
+
+                  "recent_avg_carries":
+
+                      round(
+
+                          avg_carries,
+
+                          2
+
+                      ),
+
+                  "recent_avg_receptions":
+
+                      round(
+
+                          avg_receptions,
+
+                          2
+
+                      ),
+
+                  "position":
+
+                      position
+
+              }
+
+          print(
+
+              "Historical TD profiles:",
+
+              len(profiles)
+
+          )
+
+          # ========================================================
+
+          # POSITION PRIORS
+
+          #
+
+          # Used for shrinkage only.
+
+          # ========================================================
+
+          position_prior = {
+
+              "QB": 0.16,
+
+              "RB": 0.31,
+
+              "WR": 0.24,
+
+              "TE": 0.20
+
+          }
+
+          # ========================================================
+
+          # UNIQUE GAMEDAY PLAYERS
+
+          # ========================================================
+
+          player_props = defaultdict(
+
+              list
+
+          )
 
           for prop in gameday_rows:
 
-              gameday = prop.get(
-                  "jpro_gameday_v1",
-                  {}
-              )
+              team = str(
 
-              analysis = prop.get(
-                  "player_analysis_v1",
+                  prop.get("team")
+
+                  or ""
+
+              ).upper()
+
+              if team not in TARGET_TEAMS:
+
+                  continue
+
+              player = str(
+
+                  prop.get("player")
+
+                  or ""
+
+              ).strip()
+
+              if not player:
+
+                  continue
+
+              player_props[
+
+                  (
+
+                      team,
+
+                      player
+
+                  )
+
+              ].append(prop)
+
+          print(
+
+              "Unique gameday players:",
+
+              len(player_props)
+
+          )
+
+          # ========================================================
+
+          # BUILD TD MODEL
+
+          # ========================================================
+
+          td_board = []
+
+          matched_profiles = 0
+
+          insufficient_profiles = 0
+
+          for (
+
+              team,
+
+              player
+
+          ), props in player_props.items():
+
+              # ----------------------------------------------------
+
+              # USE FIRST PROP AS PLAYER CONTEXT
+
+              # ----------------------------------------------------
+
+              first = props[0]
+
+              gameday = first.get(
+
+                  "jpro_gameday_v1",
+
                   {}
+
               )
 
               if not gameday.get(
+
                   "gameday_eligible"
+
               ):
+
                   continue
 
-              gameday_board.append({
-                  "player_id":
-                      prop.get("player_id"),
+              position = str(
+
+                  first.get("position")
+
+                  or ""
+
+              ).upper()
+
+              if position not in {
+
+                  "QB",
+
+                  "RB",
+
+                  "WR",
+
+                  "TE"
+
+              }:
+
+                  continue
+
+              key = normalize_name(
+
+                  player
+
+              )
+
+              profile = profiles.get(
+
+                  key
+
+              )
+
+              role = first.get(
+
+                  "role",
+
+                  {}
+
+              )
+
+              if not isinstance(
+
+                  role,
+
+                  dict
+
+              ):
+
+                  role = {}
+
+              role_score = num(
+
+                  role.get(
+
+                      "role_score"
+
+                  ),
+
+                  50
+
+              )
+
+              role_label = role.get(
+
+                  "role_label",
+
+                  "UNKNOWN"
+
+              )
+
+              matchup = first.get(
+
+                  "matchup",
+
+                  {}
+
+              )
+
+              if not isinstance(
+
+                  matchup,
+
+                  dict
+
+              ):
+
+                  matchup = {}
+
+              matchup_score = num(
+
+                  matchup.get(
+
+                      "matchup_score"
+
+                  ),
+
+                  50
+
+              )
+
+              matchup_label = matchup.get(
+
+                  "matchup_label",
+
+                  "NEUTRAL"
+
+              )
+
+              availability_sensitive = any(
+
+                  bool(
+
+                      p.get(
+
+                          "jpro_gameday_v1",
+
+                          {}
+
+                      ).get(
+
+                          "availability_sensitive"
+
+                      )
+
+                  )
+
+                  for p in props
+
+              )
+
+              # ----------------------------------------------------
+
+              # NO PROFILE
+
+              # ----------------------------------------------------
+
+              if profile is None:
+
+                  insufficient_profiles += 1
+
+                  td_analysis = {
+
+                      "version":
+
+                          "JPRO_TD_ENGINE_V1.1",
+
+                      "status":
+
+                          "INSUFFICIENT_EVIDENCE",
+
+                      "player":
+
+                          player,
+
+                      "team":
+
+                          team,
+
+                      "position":
+
+                          position,
+
+                      "anytime_td_probability":
+
+                          None,
+
+                      "two_plus_td_probability":
+
+                          None,
+
+                      "anytime_fair_odds":
+
+                          None,
+
+                      "two_plus_fair_odds":
+
+                          None,
+
+                      "confidence":
+
+                          "INSUFFICIENT",
+
+                      "why_jpro":
+
+                          [
+
+                              (
+
+                                  "JPro could not match enough "
+
+                                  "historical touchdown data for "
+
+                                  "this player."
+
+                              )
+
+                          ],
+
+                      "risk_factors":
+
+                          [
+
+                              (
+
+                                  "TD probability is not shown "
+
+                                  "rather than fabricating a number."
+
+                              )
+
+                          ]
+
+                  }
+
+                  for prop in props:
+
+                      prop[
+
+                          "td_analysis"
+
+                      ] = td_analysis
+
+                  continue
+
+              matched_profiles += 1
+
+              # ----------------------------------------------------
+
+              # SHRUNK BASE TD RATE
+
+              #
+
+              # Current season receives weight, but with only
+
+              # two games it cannot dominate the estimate.
+
+              # ----------------------------------------------------
+
+              prior_games = int(
+
+                  profile[
+
+                      "prior_games"
+
+                  ]
+
+              )
+
+              current_games = int(
+
+                  profile[
+
+                      "current_games"
+
+                  ]
+
+              )
+
+              career_games = int(
+
+                  profile[
+
+                      "career_games"
+
+                  ]
+
+              )
+
+              recent_games = int(
+
+                  profile[
+
+                      "recent_games"
+
+                  ]
+
+              )
+
+              prior_rate = num(
+
+                  profile[
+
+                      "prior_td_rate"
+
+                  ]
+
+              )
+
+              current_rate = num(
+
+                  profile[
+
+                      "current_td_rate"
+
+                  ]
+
+              )
+
+              recent_rate = num(
+
+                  profile[
+
+                      "recent_td_rate"
+
+                  ]
+
+              )
+
+              career_rate = num(
+
+                  profile[
+
+                      "career_td_per_game"
+
+                  ]
+
+              )
+
+              prior_position = (
+
+                  position_prior.get(
+
+                      position,
+
+                      0.20
+
+                  )
+
+              )
+
+              # ----------------------------------------------------
+
+              # EVIDENCE WEIGHTS
+
+              # ----------------------------------------------------
+
+              career_weight = min(
+
+                  career_games / 32,
+
+                  1.0
+
+              ) * 0.20
+
+              prior_weight = min(
+
+                  prior_games / 12,
+
+                  1.0
+
+              ) * 0.35
+
+              current_weight = min(
+
+                  current_games / 6,
+
+                  1.0
+
+              ) * 0.20
+
+              recent_weight = min(
+
+                  recent_games / 8,
+
+                  1.0
+
+              ) * 0.15
+
+              prior_shrink_weight = 0.10
+
+              total_weight = (
+
+                  career_weight
+
+                  + prior_weight
+
+                  + current_weight
+
+                  + recent_weight
+
+                  + prior_shrink_weight
+
+              )
+
+              if total_weight <= 0:
+
+                  base_lambda = (
+
+                      prior_position
+
+                  )
+
+              else:
+
+                  base_lambda = (
+
+                      career_rate
+
+                      * career_weight
+
+                      + prior_rate
+
+                      * prior_weight
+
+                      + current_rate
+
+                      * current_weight
+
+                      + recent_rate
+
+                      * recent_weight
+
+                      + prior_position
+
+                      * prior_shrink_weight
+
+                  ) / total_weight
+
+              # ----------------------------------------------------
+
+              # ROLE ADJUSTMENT
+
+              #
+
+              # Role is used conservatively.
+
+              #
+
+              # 50 = neutral
+
+              # 100 = max +15%
+
+              # 0 = max -15%
+
+              # ----------------------------------------------------
+
+              role_multiplier = (
+
+                  1.0
+
+                  + clamp(
+
+                      (
+
+                          role_score
+
+                          - 50
+
+                      )
+
+                      / 50
+
+                      * 0.15,
+
+                      -0.15,
+
+                      0.15
+
+                  )
+
+              )
+
+              # ----------------------------------------------------
+
+              # MATCHUP ADJUSTMENT
+
+              #
+
+              # Conservative because existing matchup model is
+
+              # production allowed, not TD-specific defense.
+
+              # ----------------------------------------------------
+
+              matchup_multiplier = (
+
+                  1.0
+
+                  + clamp(
+
+                      (
+
+                          matchup_score
+
+                          - 50
+
+                      )
+
+                      / 50
+
+                      * 0.08,
+
+                      -0.08,
+
+                      0.08
+
+                  )
+
+              )
+
+              # ----------------------------------------------------
+
+              # GAMEDAY UNCERTAINTY
+
+              #
+
+              # IMPORTANT:
+
+              # We do NOT automatically boost players because
+
+              # Goedert/Brown are out.
+
+              #
+
+              # We preserve the central estimate and lower
+
+              # confidence instead.
+
+              # ----------------------------------------------------
+
+              gameday_multiplier = 1.0
+
+              adjusted_lambda = (
+
+                  base_lambda
+
+                  * role_multiplier
+
+                  * matchup_multiplier
+
+                  * gameday_multiplier
+
+              )
+
+              adjusted_lambda = clamp(
+
+                  adjusted_lambda,
+
+                  0.01,
+
+                  1.35
+
+              )
+
+              # ----------------------------------------------------
+
+              # PROBABILITIES
+
+              # ----------------------------------------------------
+
+              anytime_probability = (
+
+                  poisson_at_least_one(
+
+                      adjusted_lambda
+
+                  )
+
+              )
+
+              two_plus_probability = (
+
+                  poisson_two_plus(
+
+                      adjusted_lambda
+
+                  )
+
+              )
+
+              # ----------------------------------------------------
+
+              # EVIDENCE CONFIDENCE
+
+              # ----------------------------------------------------
+
+              evidence_score = 35
+
+              if career_games >= 32:
+
+                  evidence_score += 15
+
+              elif career_games >= 16:
+
+                  evidence_score += 10
+
+              elif career_games >= 8:
+
+                  evidence_score += 5
+
+              if prior_games >= 12:
+
+                  evidence_score += 15
+
+              elif prior_games >= 6:
+
+                  evidence_score += 8
+
+              if current_games >= 2:
+
+                  evidence_score += 5
+
+              if recent_games >= 6:
+
+                  evidence_score += 10
+
+              if role_score >= 65:
+
+                  evidence_score += 5
+
+              if availability_sensitive:
+
+                  evidence_score -= 10
+
+              if player == "Case Keenum":
+
+                  evidence_score -= 20
+
+              evidence_score = int(
+
+                  clamp(
+
+                      evidence_score,
+
+                      0,
+
+                      100
+
+                  )
+
+              )
+
+              if evidence_score >= 70:
+
+                  confidence = "HIGHER"
+
+              elif evidence_score >= 50:
+
+                  confidence = "MODERATE"
+
+              elif evidence_score >= 30:
+
+                  confidence = "LOWER"
+
+              else:
+
+                  confidence = "INSUFFICIENT"
+
+              # ----------------------------------------------------
+
+              # FAIL CLOSED
+
+              # ----------------------------------------------------
+
+              if (
+
+                  career_games < 4
+
+                  and prior_games < 4
+
+              ):
+
+                  status = (
+
+                      "INSUFFICIENT_EVIDENCE"
+
+                  )
+
+              elif confidence == "INSUFFICIENT":
+
+                  status = (
+
+                      "INSUFFICIENT_EVIDENCE"
+
+                  )
+
+              elif availability_sensitive:
+
+                  status = (
+
+                      "REVIEW_GAMEDAY_CONTEXT"
+
+                  )
+
+              else:
+
+                  status = (
+
+                      "MODEL_READY"
+
+                  )
+
+              # ----------------------------------------------------
+
+              # EXPLANATION
+
+              # ----------------------------------------------------
+
+              why = []
+
+              why.append(
+
+                  (
+
+                      f"JPro found {career_games} historical "
+
+                      f"games for {player}."
+
+                  )
+
+              )
+
+              why.append(
+
+                  (
+
+                      "Historical TD rate: "
+
+                      f"{round(career_rate, 3)} "
+
+                      "touchdowns per game."
+
+                  )
+
+              )
+
+              if prior_games:
+
+                  why.append(
+
+                      (
+
+                          f"2025 sample: {prior_games} games "
+
+                          f"at {round(prior_rate, 3)} "
+
+                          "TDs per game."
+
+                      )
+
+                  )
+
+              if current_games:
+
+                  why.append(
+
+                      (
+
+                          f"2026 pregame sample: "
+
+                          f"{current_games} games at "
+
+                          f"{round(current_rate, 3)} "
+
+                          "TDs per game."
+
+                      )
+
+                  )
+
+              if recent_games:
+
+                  why.append(
+
+                      (
+
+                          f"Recent {recent_games}-game "
+
+                          f"TD rate: "
+
+                          f"{round(recent_rate, 3)}."
+
+                      )
+
+                  )
+
+              why.append(
+
+                  (
+
+                      f"Role V2: {role_label} "
+
+                      f"({round(role_score, 1)})."
+
+                  )
+
+              )
+
+              why.append(
+
+                  (
+
+                      f"Opponent production matchup: "
+
+                      f"{matchup_label} "
+
+                      f"({round(matchup_score, 1)})."
+
+                  )
+
+              )
+
+              why.append(
+
+                  (
+
+                      "JPro shrinks small samples toward "
+
+                      "a position-level TD prior rather "
+
+                      "than treating a two-game scoring "
+
+                      "streak as a stable TD rate."
+
+                  )
+
+              )
+
+              if availability_sensitive:
+
+                  why.append(
+
+                      (
+
+                          "Tonight's projection is marked "
+
+                          "availability-sensitive. JPro does "
+
+                          "not automatically transfer missing "
+
+                          "players' touchdowns or targets to "
+
+                          "this player."
+
+                      )
+
+                  )
+
+              if team == "CHI":
+
+                  why.append(
+
+                      (
+
+                          "Chicago's offensive environment "
+
+                          "contains additional uncertainty "
+
+                          "with Case Keenum expected to start."
+
+                      )
+
+                  )
+
+              if team == "PHI":
+
+                  why.append(
+
+                      (
+
+                          "Philadelphia is without Dallas "
+
+                          "Goedert and Marquise Brown, which "
+
+                          "may alter scoring opportunity "
+
+                          "distribution."
+
+                      )
+
+                  )
+
+              risks = [
+
+                  (
+
+                      "Touchdowns are low-frequency events "
+
+                      "with substantial game-to-game variance."
+
+                  ),
+
+                  (
+
+                      "TD V1.1 does not yet include validated "
+
+                      "play-by-play red-zone or goal-line "
+
+                      "opportunity features."
+
+                  ),
+
+                  (
+
+                      "Role and matchup adjustments are "
+
+                      "conservative heuristics and have not "
+
+                      "yet been separately calibrated against "
+
+                      "sportsbook TD markets."
+
+                  )
+
+              ]
+
+              if availability_sensitive:
+
+                  risks.append(
+
+                      (
+
+                          "Tonight's personnel changes make "
+
+                          "historical role comparisons less "
+
+                          "directly representative."
+
+                      )
+
+                  )
+
+              if player == "Case Keenum":
+
+                  risks.append(
+
+                      (
+
+                          "Keenum has not thrown a "
+
+                          "regular-season pass since 2023."
+
+                      )
+
+                  )
+
+              td_analysis = {
+
+                  "version":
+
+                      "JPRO_TD_ENGINE_V1.1",
+
+                  "model_type":
+
+                      "SHRUNK_HISTORICAL_TD_RATE_POISSON_V1",
+
+                  "experimental":
+
+                      True,
+
+                  "status":
+
+                      status,
 
                   "player":
-                      prop.get("player"),
+
+                      player,
 
                   "team":
-                      prop.get("team"),
 
-                  "opponent":
-                      prop.get("opponent"),
+                      team,
 
                   "position":
-                      prop.get("position"),
 
-                  "prop":
-                      prop.get("prop"),
+                      position,
 
-                  "projection":
-                      prop.get("projection"),
+                  "anytime_td_probability":
 
-                  "median":
-                      analysis.get(
-                          "distribution",
-                          {}
-                      ).get("median"),
+                      round(
 
-                  "p25":
-                      analysis.get(
-                          "distribution",
-                          {}
-                      ).get("p25"),
+                          anytime_probability,
 
-                  "p75":
-                      analysis.get(
-                          "distribution",
-                          {}
-                      ).get("p75"),
+                          4
 
-                  "p10":
-                      analysis.get(
-                          "distribution",
-                          {}
-                      ).get("p10"),
-
-                  "p90":
-                      analysis.get(
-                          "distribution",
-                          {}
-                      ).get("p90"),
-
-                  "role_label":
-                      analysis.get(
-                          "expected_role",
-                          {}
-                      ).get("label"),
-
-                  "role_score":
-                      analysis.get(
-                          "expected_role",
-                          {}
-                      ).get("score"),
-
-                  "matchup_label":
-                      analysis.get(
-                          "matchup_intelligence",
-                          {}
-                      ).get("label"),
-
-                  "matchup_score":
-                      analysis.get(
-                          "matchup_intelligence",
-                          {}
-                      ).get("score"),
-
-                  "projection_confidence":
-                      analysis.get(
-                          "projection_confidence"
                       ),
+
+                  "anytime_td_probability_pct":
+
+                      round(
+
+                          anytime_probability
+
+                          * 100,
+
+                          1
+
+                      ),
+
+                  "anytime_fair_odds":
+
+                      american_from_probability(
+
+                          anytime_probability
+
+                      ),
+
+                  "two_plus_td_probability":
+
+                      round(
+
+                          two_plus_probability,
+
+                          4
+
+                      ),
+
+                  "two_plus_td_probability_pct":
+
+                      round(
+
+                          two_plus_probability
+
+                          * 100,
+
+                          1
+
+                      ),
+
+                  "two_plus_fair_odds":
+
+                      american_from_probability(
+
+                          two_plus_probability
+
+                      ),
+
+                  "expected_td_lambda":
+
+                      round(
+
+                          adjusted_lambda,
+
+                          4
+
+                      ),
+
+                  "base_td_lambda":
+
+                      round(
+
+                          base_lambda,
+
+                          4
+
+                      ),
+
+                  "role_multiplier":
+
+                      round(
+
+                          role_multiplier,
+
+                          4
+
+                      ),
+
+                  "matchup_multiplier":
+
+                      round(
+
+                          matchup_multiplier,
+
+                          4
+
+                      ),
+
+                  "gameday_multiplier":
+
+                      gameday_multiplier,
+
+                  "historical_evidence":
+
+                      profile,
+
+                  "role": {
+
+                      "label":
+
+                          role_label,
+
+                      "score":
+
+                          round(
+
+                              role_score,
+
+                              2
+
+                          )
+
+                  },
+
+                  "matchup": {
+
+                      "label":
+
+                          matchup_label,
+
+                      "score":
+
+                          round(
+
+                              matchup_score,
+
+                              2
+
+                          )
+
+                  },
 
                   "availability_sensitive":
-                      gameday.get(
-                          "availability_sensitive"
-                      ),
 
-                  "market_readiness":
-                      gameday.get(
-                          "market_readiness"
-                      ),
+                      availability_sensitive,
 
-                  "player_analysis":
-                      analysis
-              })
+                  "confidence": {
 
-          # ========================================================
-          # SORT BOARD
-          #
-          # MODEL_READY first
-          # REVIEW second
-          # ========================================================
+                      "label":
 
-          readiness_order = {
-              "MODEL_READY": 0,
-              "REVIEW_AVAILABILITY_SENSITIVE": 1,
-              "INSUFFICIENT_GAMEDAY_EVIDENCE": 2,
-              "INSUFFICIENT_SIMULATION_DATA": 3,
-              "NO_PLAY_UNAVAILABLE": 4
-          }
+                          confidence,
 
-          gameday_board.sort(
-              key=lambda x: (
-                  readiness_order.get(
-                      x.get(
-                          "market_readiness"
-                      ),
-                      99
-                  ),
-                  -(
-                      num(
-                          x.get(
-                              "role_score"
-                          ),
-                          0
+                      "score":
+
+                          evidence_score,
+
+                      "meaning":
+
+                          (
+
+                              "Evidence quality only. "
+
+                              "Not probability of winning."
+
+                          )
+
+                  },
+
+                  "sportsbook": {
+
+                      "connected":
+
+                          False,
+
+                      "anytime_odds":
+
+                          None,
+
+                      "two_plus_odds":
+
+                          None,
+
+                      "market_implied_probability":
+
+                          None,
+
+                      "model_difference":
+
+                          None
+
+                  },
+
+                  "why_jpro":
+
+                      why,
+
+                  "data_used": [
+
+                      "nflverse weekly player statistics",
+
+                      "career rushing and receiving TD history",
+
+                      "2025 touchdown rate",
+
+                      "2026 pregame touchdown rate",
+
+                      "recent touchdown rate",
+
+                      "Role V2 opportunity score",
+
+                      "opponent production matchup score",
+
+                      "JPro Gameday availability context",
+
+                      "position-level shrinkage prior"
+
+                  ],
+
+                  "risk_factors":
+
+                      risks,
+
+                  "important_note":
+
+                      (
+
+                          "TD V1.1 is experimental. "
+
+                          "A sportsbook price is required "
+
+                          "before evaluating market value."
+
                       )
-                      or 0
-                  ),
-                  str(
-                      x.get("player")
+
+              }
+
+              # ----------------------------------------------------
+
+              # ATTACH TD ANALYSIS TO EVERY PROP FOR PLAYER
+
+              # ----------------------------------------------------
+
+              for prop in props:
+
+                  prop[
+
+                      "td_analysis"
+
+                  ] = td_analysis
+
+                  player_analysis = prop.get(
+
+                      "player_analysis_v1"
+
                   )
-              )
+
+                  if isinstance(
+
+                      player_analysis,
+
+                      dict
+
+                  ):
+
+                      player_analysis[
+
+                          "touchdown_analysis"
+
+                      ] = td_analysis
+
+              # ----------------------------------------------------
+
+              # TD BOARD
+
+              # ----------------------------------------------------
+
+              if (
+
+                  status
+
+                  != "INSUFFICIENT_EVIDENCE"
+
+              ):
+
+                  td_board.append({
+
+                      "player":
+
+                          player,
+
+                      "team":
+
+                          team,
+
+                      "position":
+
+                          position,
+
+                      "anytime_td_probability":
+
+                          round(
+
+                              anytime_probability,
+
+                              4
+
+                          ),
+
+                      "anytime_td_probability_pct":
+
+                          round(
+
+                              anytime_probability
+
+                              * 100,
+
+                              1
+
+                          ),
+
+                      "anytime_fair_odds":
+
+                          american_from_probability(
+
+                              anytime_probability
+
+                          ),
+
+                      "two_plus_td_probability":
+
+                          round(
+
+                              two_plus_probability,
+
+                              4
+
+                          ),
+
+                      "two_plus_td_probability_pct":
+
+                          round(
+
+                              two_plus_probability
+
+                              * 100,
+
+                              1
+
+                          ),
+
+                      "two_plus_fair_odds":
+
+                          american_from_probability(
+
+                              two_plus_probability
+
+                          ),
+
+                      "role_label":
+
+                          role_label,
+
+                      "role_score":
+
+                          round(
+
+                              role_score,
+
+                              2
+
+                          ),
+
+                      "matchup_label":
+
+                          matchup_label,
+
+                      "matchup_score":
+
+                          round(
+
+                              matchup_score,
+
+                              2
+
+                          ),
+
+                      "confidence":
+
+                          confidence,
+
+                      "confidence_score":
+
+                          evidence_score,
+
+                      "availability_sensitive":
+
+                          availability_sensitive,
+
+                      "status":
+
+                          status,
+
+                      "sportsbook_anytime_odds":
+
+                          None,
+
+                      "sportsbook_two_plus_odds":
+
+                          None,
+
+                      "qualified_pick":
+
+                          False,
+
+                      "td_analysis":
+
+                          td_analysis
+
+                  })
+
+          # ========================================================
+
+          # SORT TD BOARD
+
+          # ========================================================
+
+          td_board.sort(
+
+              key=lambda x: (
+
+                  x.get(
+
+                      "anytime_td_probability",
+
+                      0
+
+                  ),
+
+                  x.get(
+
+                      "confidence_score",
+
+                      0
+
+                  )
+
+              ),
+
+              reverse=True
+
           )
 
           # ========================================================
-          # TOP-LEVEL GAMEDAY OBJECT
+
+          # TOP-LEVEL ENGINE METADATA
+
           # ========================================================
 
+          ready_count = sum(
+
+              1 for x in td_board
+
+              if x.get("status")
+
+              == "MODEL_READY"
+
+          )
+
+          review_count = sum(
+
+              1 for x in td_board
+
+              if x.get("status")
+
+              == "REVIEW_GAMEDAY_CONTEXT"
+
+          )
+
           data[
-              "jpro_gameday_engine"
+
+              "jpro_td_engine"
+
           ] = {
+
               "version":
-                  "JPRO_GAMEDAY_ENGINE_V1",
+
+                  "JPRO_TD_ENGINE_V1.1",
 
               "status":
-                  "READY",
+
+                  "EXPERIMENTAL_READY",
 
               "game":
-                  GAME_LABEL,
 
-              "date":
-                  "2026-09-28",
+                  "PHI @ CHI",
 
-              "kickoff_et":
-                  "8:15 PM",
+              "model":
 
-              "teams": [
-                  "PHI",
-                  "CHI"
+                  "SHRUNK_HISTORICAL_TD_RATE_POISSON_V1",
+
+              "historical_seasons": [
+
+                  2022,
+
+                  2023,
+
+                  2024,
+
+                  2025,
+
+                  2026
+
               ],
 
-              "expected_starting_qbs":
-                  EXPECTED_STARTING_QB,
+              "training_cutoff":
 
-              "verified_out":
-                  CONFIRMED_OUT,
+                  "Before 2026 Week 3",
 
-              "questionable_context":
-                  QUESTIONABLE_CONTEXT,
+              "matched_player_profiles":
 
-              "full_practice_context":
-                  FULL_PRACTICE_CONTEXT,
+                  matched_profiles,
 
-              "base_availability_gate":
-                  "JPRO_AVAILABILITY_GATE_V1.5.1",
+              "insufficient_player_profiles":
 
-              "base_model_preserved":
+                  insufficient_profiles,
+
+              "td_board_players":
+
+                  len(td_board),
+
+              "model_ready_players":
+
+                  ready_count,
+
+              "review_players":
+
+                  review_count,
+
+              "anytime_td_enabled":
+
                   True,
 
-              "simulation_engine_preserved":
+              "two_plus_td_enabled":
+
                   True,
 
-              "injury_redistribution_enabled":
+              "sportsbook_connected":
+
                   False,
 
-              "injury_redistribution_reason":
-                  (
-                      "No unvalidated workload-transfer "
-                      "multipliers are used in Gameday V1."
-                  ),
+              "sportsbook_price_required":
 
-              "projection_rows":
-                  len(gameday_rows),
+                  True,
 
-              "unique_players":
-                  len(gameday_players),
+              "red_zone_features_enabled":
 
-              "model_ready_rows":
-                  model_ready_rows,
-
-              "availability_sensitive_rows":
-                  availability_sensitive_rows,
-
-              "review_rows":
-                  review_rows,
-
-              "insufficient_rows":
-                  insufficient_rows,
-
-              "verified_out_players_found":
-                  len(
-                      blocked_by_verified_out
-                  ),
-
-              "case_keenum_projection_available":
-                  keenum_projection_available,
-
-              "case_keenum_note":
-                  (
-                      "Case Keenum is expected to start for "
-                      "Chicago. If the base model does not have "
-                      "a defensible Keenum distribution, JPro "
-                      "does not fabricate one."
-                  ),
-
-              "market_prices_connected":
                   False,
 
-              "market_input_required":
+              "goal_line_features_enabled":
+
+                  False,
+
+              "yardage_model_used_as_td_probability":
+
+                  False,
+
+              "availability_automatic_boost":
+
+                  False,
+
+              "qualified_picks_enabled":
+
+                  False,
+
+              "experimental":
+
                   True,
-
-              "player_analysis_enabled":
-                  True,
-
-              "player_analysis_version":
-                  "JPRO_PLAYER_ANALYSIS_GAMEDAY_V1",
-
-              "confidence_note":
-                  (
-                      "Projection confidence measures evidence "
-                      "quality and does not represent certainty "
-                      "or guaranteed betting performance."
-                  ),
 
               "generated_at_utc":
+
                   datetime.now(
+
                       timezone.utc
-                  ).isoformat()
+
+                  ).isoformat(),
+
+              "note":
+
+                  (
+
+                      "TD V1.1 is an experimental "
+
+                      "pregame probability model. "
+
+                      "It is not yet separately calibrated "
+
+                      "against sportsbook TD markets and "
+
+                      "does not contain validated red-zone "
+
+                      "or goal-line play-by-play features."
+
+                  )
+
           }
 
           data[
-              "jpro_gameday_board"
-          ] = gameday_board
 
-          data[
-              "jpro_gameday_game"
-          ] = {
-              "game":
-                  GAME_LABEL,
+              "jpro_td_board"
 
-              "away_team":
-                  "PHI",
-
-              "home_team":
-                  "CHI",
-
-              "expected_starting_qb_away":
-                  "Jalen Hurts",
-
-              "expected_starting_qb_home":
-                  "Case Keenum",
-
-              "kickoff":
-                  "2026-09-28 8:15 PM ET"
-          }
+          ] = td_board
 
           # ========================================================
+
           # SAVE
+
           # ========================================================
 
           with open(
+
               PATH,
+
               "w",
+
               encoding="utf-8"
+
           ) as f:
+
               json.dump(
+
                   data,
+
                   f,
+
                   separators=(",", ":")
+
               )
 
           # ========================================================
-          # OUTPUT
+
+          # PRINT RESULTS
+
           # ========================================================
 
           print("")
+
           print("=" * 78)
-          print("GAMEDAY BUILD COMPLETE")
+
+          print("JPRO TD ENGINE V1.1 COMPLETE")
+
           print("=" * 78)
 
           print(
-              "Game:",
-              GAME_LABEL
+
+              "Matched profiles:",
+
+              matched_profiles
+
           )
 
           print(
-              "Gameday projection rows:",
-              len(gameday_rows)
+
+              "Insufficient profiles:",
+
+              insufficient_profiles
+
           )
 
           print(
-              "Unique players:",
-              len(gameday_players)
+
+              "TD board players:",
+
+              len(td_board)
+
           )
 
           print(
-              "Model-ready rows:",
-              model_ready_rows
+
+              "Model-ready:",
+
+              ready_count
+
           )
 
           print(
-              "Availability-sensitive rows:",
-              availability_sensitive_rows
-          )
 
-          print(
-              "Review rows:",
-              review_rows
-          )
+              "Gameday review:",
 
-          print(
-              "Other / insufficient rows:",
-              insufficient_rows
-          )
+              review_count
 
-          print(
-              "Verified-out players found:",
-              len(
-                  blocked_by_verified_out
-              )
-          )
-
-          print(
-              "Case Keenum projection available:",
-              keenum_projection_available
           )
 
           print("")
-          print("READINESS COUNTS")
 
-          for key, value in sorted(
-              readiness_counts.items()
+          print("=" * 78)
+
+          print("JPRO ANYTIME TD BOARD")
+
+          print("=" * 78)
+
+          for i, item in enumerate(
+
+              td_board,
+
+              start=1
+
           ):
-              print(
-                  " ",
-                  key,
-                  ":",
-                  value
-              )
-
-          print("")
-          print("TEAM ROWS")
-
-          for key, value in sorted(
-              team_counts.items()
-          ):
-              print(
-                  " ",
-                  key,
-                  ":",
-                  value
-              )
-
-          print("")
-          print("=" * 78)
-          print("GAMEDAY BOARD PREVIEW")
-          print("=" * 78)
-
-          for item in gameday_board[:40]:
 
               print("")
 
               print(
-                  item.get("player"),
+
+                  f"#{i}",
+
+                  item["player"],
+
                   "|",
-                  item.get("team"),
+
+                  item["team"],
+
                   "|",
-                  item.get("position")
+
+                  item["position"]
+
               )
 
               print(
-                  "  PROP:",
-                  item.get("prop")
+
+                  "  ATTD:",
+
+                  str(
+
+                      item[
+
+                          "anytime_td_probability_pct"
+
+                      ]
+
+                  )
+
+                  + "%"
+
               )
 
               print(
-                  "  PROJECTION:",
-                  item.get("projection")
+
+                  "  FAIR ODDS:",
+
+                  item[
+
+                      "anytime_fair_odds"
+
+                  ]
+
               )
 
               print(
-                  "  MEDIAN:",
-                  item.get("median")
+
+                  "  2+ TD:",
+
+                  str(
+
+                      item[
+
+                          "two_plus_td_probability_pct"
+
+                      ]
+
+                  )
+
+                  + "%"
+
               )
 
               print(
-                  "  RANGE P25-P75:",
-                  item.get("p25"),
-                  "-",
-                  item.get("p75")
+
+                  "  2+ FAIR:",
+
+                  item[
+
+                      "two_plus_fair_odds"
+
+                  ]
+
               )
 
               print(
+
                   "  ROLE:",
-                  item.get("role_label"),
-                  item.get("role_score")
+
+                  item["role_label"],
+
+                  item["role_score"]
+
               )
 
               print(
+
                   "  MATCHUP:",
-                  item.get("matchup_label"),
-                  item.get("matchup_score")
-              )
 
-              confidence = item.get(
-                  "projection_confidence",
-                  {}
+                  item["matchup_label"],
+
+                  item["matchup_score"]
+
               )
 
               print(
+
                   "  CONFIDENCE:",
-                  confidence.get("label"),
-                  confidence.get("score")
+
+                  item["confidence"],
+
+                  item["confidence_score"]
+
               )
 
               print(
-                  "  AVAILABILITY SENSITIVE:",
-                  item.get(
-                      "availability_sensitive"
-                  )
-              )
 
-              print(
-                  "  MARKET READINESS:",
-                  item.get(
-                      "market_readiness"
-                  )
-              )
+                  "  STATUS:",
 
-          print("")
-          print("=" * 78)
-          print("JPRO GAMEDAY ENGINE V1 READY")
-          print("=" * 78)
+                  item["status"]
+
+              )
 
           PY
 
       # ============================================================
-      # VERIFY GAMEDAY ENGINE
+
+      # VERIFY TD ENGINE
+
       # ============================================================
 
-      - name: Verify Eagles Bears Gameday Engine
+      - name: Verify JPro TD Engine V1.1
+
         run: |
+
           python <<'PY'
+
           import json
 
+          import math
+
           PATH = "data/jpro-current-projections.json"
-          EXPECTED_SIMS = 20000
 
           print("=" * 78)
-          print("VERIFY JPRO GAMEDAY ENGINE V1")
+
+          print("VERIFY JPRO TD ENGINE V1.1")
+
           print("=" * 78)
 
           with open(
+
               PATH,
+
               "r",
+
               encoding="utf-8"
+
           ) as f:
+
               data = json.load(f)
 
           engine = data.get(
-              "jpro_gameday_engine",
+
+              "jpro_td_engine",
+
               {}
+
           )
 
           if (
+
               engine.get("version")
-              != "JPRO_GAMEDAY_ENGINE_V1"
+
+              != "JPRO_TD_ENGINE_V1.1"
+
           ):
+
               raise RuntimeError(
-                  "Wrong Gameday Engine version."
+
+                  "Wrong TD Engine version."
+
               )
 
           if (
+
               engine.get("status")
-              != "READY"
+
+              != "EXPERIMENTAL_READY"
+
           ):
+
               raise RuntimeError(
-                  "Gameday Engine is not READY."
+
+                  "TD Engine not ready."
+
               )
 
           if (
+
               engine.get(
-                  "base_availability_gate"
-              )
-              != "JPRO_AVAILABILITY_GATE_V1.5.1"
-          ):
-              raise RuntimeError(
-                  "Wrong availability foundation."
+
+                  "yardage_model_used_as_td_probability"
+
               )
 
-          if (
-              engine.get(
-                  "injury_redistribution_enabled"
-              )
               is not False
+
           ):
+
               raise RuntimeError(
-                  "Unvalidated redistribution "
-                  "must not be enabled."
+
+                  "TD probability incorrectly "
+
+                  "derived from yardage model."
+
               )
 
-          projections = data.get(
-              "projections",
-              []
-          )
+          if (
 
-          gameday_rows = []
+              engine.get(
 
-          for prop in projections:
+                  "availability_automatic_boost"
 
-              gameday = prop.get(
-                  "jpro_gameday_v1"
               )
 
-              if (
-                  isinstance(
-                      gameday,
-                      dict
-                  )
-                  and gameday.get(
-                      "engine"
-                  )
-                  == "JPRO_GAMEDAY_ENGINE_V1"
-              ):
-                  gameday_rows.append(
-                      prop
-                  )
+              is not False
 
-          if not gameday_rows:
-              raise RuntimeError(
-                  "No gameday projection rows."
-              )
-
-          teams = {
-              str(
-                  p.get("team")
-              ).upper()
-              for p in gameday_rows
-          }
-
-          if not teams.issubset(
-              {
-                  "PHI",
-                  "CHI"
-              }
           ):
+
               raise RuntimeError(
-                  "Non-PHI/CHI team entered "
-                  "gameday board."
+
+                  "Unvalidated availability boost found."
+
               )
-
-          analyses = 0
-
-          valid_20k = 0
-
-          eligible = 0
-
-          unavailable = 0
-
-          sensitive = 0
-
-          for prop in gameday_rows:
-
-              analysis = prop.get(
-                  "player_analysis_v1"
-              )
-
-              if not isinstance(
-                  analysis,
-                  dict
-              ):
-                  raise RuntimeError(
-                      "Missing player analysis for "
-                      + str(
-                          prop.get("player")
-                      )
-                      + " / "
-                      + str(
-                          prop.get("prop")
-                      )
-                  )
-
-              analyses += 1
-
-              gameday = prop.get(
-                  "jpro_gameday_v1",
-                  {}
-              )
-
-              if gameday.get(
-                  "gameday_eligible"
-              ):
-                  eligible += 1
-              else:
-                  unavailable += 1
-
-              if gameday.get(
-                  "availability_sensitive"
-              ):
-                  sensitive += 1
-
-              histogram = prop.get(
-                  "simulation_histogram",
-                  []
-              )
-
-              if histogram:
-
-                  total = sum(
-                      int(row[1])
-                      for row in histogram
-                  )
-
-                  if total != EXPECTED_SIMS:
-                      raise RuntimeError(
-                          "Broken simulation distribution: "
-                          + str(
-                              prop.get("player")
-                          )
-                          + " / "
-                          + str(
-                              prop.get("prop")
-                          )
-                          + " = "
-                          + str(total)
-                      )
-
-                  valid_20k += 1
 
           board = data.get(
-              "jpro_gameday_board",
+
+              "jpro_td_board",
+
               []
+
           )
 
           if not board:
+
               raise RuntimeError(
-                  "Gameday board is empty."
+
+                  "TD board is empty."
+
               )
 
-          # --------------------------------------------------------
-          # CONFIRMED OUTS MUST NEVER APPEAR AS ELIGIBLE
-          # --------------------------------------------------------
-
-          confirmed_out_names = {
-              "Caleb Williams",
-              "Dallas Goedert",
-              "Marquise Brown",
-              "Hollywood Brown",
-              "Fred Johnson"
-          }
-
-          for prop in gameday_rows:
-
-              player = str(
-                  prop.get("player")
-                  or ""
-              ).strip()
-
-              if (
-                  player
-                  in confirmed_out_names
-              ):
-
-                  gameday = prop.get(
-                      "jpro_gameday_v1",
-                      {}
-                  )
-
-                  if gameday.get(
-                      "gameday_eligible"
-                  ) is True:
-                      raise RuntimeError(
-                          "Confirmed OUT player "
-                          "still eligible: "
-                          + player
-                      )
-
-          # --------------------------------------------------------
-          # NO FAKE SPORTSBOOK PRICES
-          # --------------------------------------------------------
+          seen = set()
 
           for item in board:
 
-              analysis = item.get(
-                  "player_analysis",
-                  {}
+              key = (
+
+                  item.get("team"),
+
+                  item.get("player")
+
               )
 
-              market = analysis.get(
-                  "market_reference",
-                  {}
+              if key in seen:
+
+                  raise RuntimeError(
+
+                      "Duplicate player on TD board: "
+
+                      + str(key)
+
+                  )
+
+              seen.add(key)
+
+              p1 = item.get(
+
+                  "anytime_td_probability"
+
               )
+
+              p2 = item.get(
+
+                  "two_plus_td_probability"
+
+              )
+
+              if p1 is None:
+
+                  raise RuntimeError(
+
+                      "Missing ATTD probability."
+
+                  )
+
+              if p2 is None:
+
+                  raise RuntimeError(
+
+                      "Missing 2+ TD probability."
+
+                  )
+
+              if not (
+
+                  0 <= p1 <= 1
+
+              ):
+
+                  raise RuntimeError(
+
+                      "Invalid ATTD probability."
+
+                  )
+
+              if not (
+
+                  0 <= p2 <= 1
+
+              ):
+
+                  raise RuntimeError(
+
+                      "Invalid 2+ probability."
+
+                  )
+
+              if p2 > p1:
+
+                  raise RuntimeError(
+
+                      "2+ probability exceeds ATTD."
+
+                  )
 
               if (
-                  market.get(
-                      "sportsbook_line"
+
+                  item.get(
+
+                      "sportsbook_anytime_odds"
+
                   )
+
                   is not None
+
               ):
+
                   raise RuntimeError(
-                      "Fabricated sportsbook line."
+
+                      "Fake sportsbook odds detected."
+
                   )
 
               if (
-                  market.get(
-                      "sportsbook_odds"
+
+                  item.get(
+
+                      "sportsbook_two_plus_odds"
+
                   )
+
                   is not None
+
               ):
+
                   raise RuntimeError(
-                      "Fabricated sportsbook odds."
+
+                      "Fake 2+ sportsbook odds detected."
+
                   )
 
-          # --------------------------------------------------------
-          # VERIFY BASE PROJECTIONS WERE NOT ALTERED
-          # --------------------------------------------------------
+              if item.get(
 
-          altered = 0
+                  "qualified_pick"
 
-          for prop in gameday_rows:
-
-              gameday = prop.get(
-                  "jpro_gameday_v1",
-                  {}
-              )
-
-              if gameday.get(
-                  "projection_adjusted"
               ):
-                  altered += 1
 
-          if altered != 0:
-              raise RuntimeError(
-                  "Gameday V1 unexpectedly "
-                  "altered model projections."
-              )
+                  raise RuntimeError(
 
-          # --------------------------------------------------------
-          # FINAL
-          # --------------------------------------------------------
+                      "Unpriced TD marked as qualified."
+
+                  )
 
           print(
-              "Gameday rows:",
-              len(gameday_rows)
-          )
 
-          print(
-              "Player analyses:",
-              analyses
-          )
+              "TD board players:",
 
-          print(
-              "Eligible gameday rows:",
-              eligible
-          )
-
-          print(
-              "Unavailable gameday rows:",
-              unavailable
-          )
-
-          print(
-              "Availability-sensitive rows:",
-              sensitive
-          )
-
-          print(
-              "Verified 20K distributions:",
-              valid_20k
-          )
-
-          print(
-              "Gameday board rows:",
               len(board)
+
           )
 
           print(
-              "Unvalidated projection adjustments:",
-              altered
+
+              "Matched historical profiles:",
+
+              engine.get(
+
+                  "matched_player_profiles"
+
+              )
+
+          )
+
+          print(
+
+              "Insufficient profiles:",
+
+              engine.get(
+
+                  "insufficient_player_profiles"
+
+              )
+
+          )
+
+          print(
+
+              "Model-ready players:",
+
+              engine.get(
+
+                  "model_ready_players"
+
+              )
+
+          )
+
+          print(
+
+              "Gameday-review players:",
+
+              engine.get(
+
+                  "review_players"
+
+              )
+
           )
 
           print("")
+
           print("=" * 78)
-          print("JPRO GAMEDAY ENGINE V1 VERIFIED")
+
+          print("JPRO TD ENGINE V1.1 VERIFIED")
+
           print("=" * 78)
 
           print(
-              "EAGLES @ BEARS: READY"
+
+              "ANYTIME TD: ACTIVE"
+
           )
 
           print(
-              "PLAYER ANALYSIS: ACTIVE"
+
+              "2+ TD: ACTIVE"
+
           )
 
           print(
-              "V1.5.1 AVAILABILITY: PRESERVED"
+
+              "HISTORICAL TD DATA: ACTIVE"
+
           )
 
           print(
-              "20K DISTRIBUTIONS: PRESERVED"
+
+              "ROLE V2: INCLUDED"
+
           )
 
           print(
-              "CONFIRMED OUTS: BLOCKED"
+
+              "MATCHUP CONTEXT: INCLUDED"
+
           )
 
           print(
-              "CASE KEENUM CONTEXT: ACTIVE"
+
+              "GAMEDAY CONTEXT: INCLUDED"
+
           )
 
           print(
+
               "FAKE SPORTSBOOK PRICES: 0"
+
           )
 
           print(
-              "UNVALIDATED REDISTRIBUTION: 0"
+
+              "AUTOMATIC INJURY BOOSTS: 0"
+
+          )
+
+          print(
+
+              "YARDAGE-AS-TD MODEL: 0"
+
+          )
+
+          print("")
+
+          print(
+
+              "TD V1.1 remains EXPERIMENTAL "
+
+              "until separately backtested and "
+
+              "market-calibrated."
+
           )
 
           PY
 
       # ============================================================
+
       # SAVE
+
       # ============================================================
 
-      - name: Save JPro Gameday Engine V1
+      - name: Save JPro TD Engine V1.1
+
         run: |
+
           git config user.name "JPro Gameday Engine"
+
           git config user.email "actions@github.com"
 
           git add data/jpro-current-projections.json
 
           if git diff --cached --quiet; then
+
             echo "No changes to commit."
+
           else
-            git commit -m "Launch JPro Gameday Engine V1 Eagles Bears"
+
+            git commit -m "Add JPro Gameday TD Engine V1.1"
+
             git push
+
           fi
