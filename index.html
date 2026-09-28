@@ -1,4486 +1,2797 @@
 <!DOCTYPE html>
+
 <html lang="en">
+
 <head>
-  <meta charset="UTF-8" />
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1.0, viewport-fit=cover"
-  />
-
-  <meta name="theme-color" content="#050505" />
-
-  <title>JPro Model V2</title>
-
-  <link rel="manifest" href="manifest.webmanifest" />
-
-  <style>
-    :root {
-      --bg: #050505;
-      --card: #0d0d0d;
-      --card2: #111111;
-      --border: #252525;
-      --border2: #343434;
-      --text: #ffffff;
-      --muted: #8e8e93;
-      --soft: #b7b7bd;
-      --good: #7ee787;
-      --warn: #f2cc60;
-      --bad: #ff7b72;
-    }
-
-    * {
-      box-sizing: border-box;
-      -webkit-tap-highlight-color: transparent;
-    }
-
-    html,
-    body {
-      margin: 0;
-      padding: 0;
-      background: var(--bg);
-      color: var(--text);
-
-      font-family:
-        -apple-system,
-        BlinkMacSystemFont,
-        "SF Pro Display",
-        "SF Pro Text",
-        Arial,
-        sans-serif;
-    }
-
-    body {
-      min-height: 100vh;
-
-      padding-bottom:
-        calc(
-          105px +
-          env(safe-area-inset-bottom)
-        );
-    }
-
-    button,
-    input,
-    select {
-      font: inherit;
-    }
-
-    button {
-      color: inherit;
-    }
-
-    .app {
-      width: 100%;
-      max-width: 760px;
-      margin: 0 auto;
-    }
-
-    .topbar {
-      position: sticky;
-      top: 0;
-      z-index: 30;
-
-      padding:
-        calc(
-          12px +
-          env(safe-area-inset-top)
-        )
-        18px
-        14px;
-
-      background:
-        rgba(5, 5, 5, .96);
-
-      border-bottom:
-        1px solid #151515;
-
-      backdrop-filter:
-        blur(18px);
-    }
-
-    .topbar-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
 
-    .brand {
-      font-size: 25px;
-      font-weight: 950;
-      letter-spacing: -1.2px;
-    }
+<meta charset="UTF-8">
 
-    .engine-badge {
-      flex-shrink: 0;
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 
-      border:
-        1px solid var(--border2);
+<meta name="theme-color" content="#050505">
 
-      border-radius: 999px;
+<title>JPro Model — Gameday</title>
 
-      padding:
-        7px 10px;
+<style>
 
-      font-size: 10px;
-      font-weight: 900;
-      letter-spacing: .8px;
+*{box-sizing:border-box}
 
-      color: #d7d7dc;
+:root{
 
-      background: #0c0c0c;
-    }
+  --bg:#050505;
 
-    .content {
-      padding:
-        20px 16px 10px;
-    }
+  --card:#0d0d0d;
 
-    .eyebrow {
-      color: var(--muted);
+  --card2:#121212;
 
-      text-transform:
-        uppercase;
+  --line:#252525;
 
-      letter-spacing:
-        1.5px;
+  --line2:#343434;
 
-      font-size: 11px;
-      font-weight: 900;
+  --text:#fff;
 
-      margin-bottom: 8px;
-    }
+  --muted:#999;
 
-    .page-title {
-      margin: 0;
+  --soft:#cfcfcf;
 
-      font-size: 30px;
-      line-height: 1.05;
+  --good:#dfffe3;
 
-      letter-spacing:
-        -1.4px;
+  --warn:#fff4c2;
 
-      font-weight: 950;
-    }
+}
 
-    .page-subtitle {
-      margin:
-        9px 0 22px;
+body{
 
-      color: var(--muted);
+  margin:0;
 
-      font-size: 14px;
-      line-height: 1.45;
-    }
+  background:var(--bg);
 
-    .section-title {
-      margin:
-        27px 0 12px;
+  color:var(--text);
 
-      font-size: 12px;
-      font-weight: 900;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
 
-      letter-spacing:
-        1.2px;
+  padding-bottom:110px;
 
-      color: #c5c5ca;
+}
 
-      text-transform:
-        uppercase;
-    }
+button,input,select{
 
-    .card {
-      width: 100%;
+  font:inherit;
 
-      border:
-        1px solid var(--border);
+}
 
-      border-radius:
-        16px;
+button{
 
-      background:
-        var(--card);
+  cursor:pointer;
 
-      margin-bottom:
-        11px;
+}
 
-      overflow: hidden;
-    }
+.app{
 
-    .tap-card {
-      cursor: pointer;
+  width:100%;
 
-      transition:
-        transform .12s ease,
-        border-color .12s ease;
-    }
+  max-width:760px;
 
-    .tap-card:active {
-      transform:
-        scale(.985);
+  margin:auto;
 
-      border-color:
-        #555;
-    }
+  padding:18px 16px 30px;
 
-    .game-card {
-      padding: 17px;
-    }
+}
 
-    .game-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 12px;
-    }
+.header{
 
-    .game-name {
-      font-size: 20px;
-      font-weight: 900;
-      letter-spacing: -.5px;
-    }
+  display:flex;
 
-    .game-meta {
-      margin-top: 6px;
-      color: var(--muted);
-      font-size: 12px;
-    }
+  align-items:center;
 
-    .arrow {
-      font-size: 21px;
-      color: #777;
-      padding-top: 1px;
-    }
+  justify-content:space-between;
 
-    .player-card {
-      padding: 16px;
-    }
+  padding:8px 2px 18px;
 
-    .player-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 14px;
-    }
+}
 
-    .player-name {
-      font-size: 17px;
-      font-weight: 900;
-      letter-spacing: -.25px;
-    }
+.logo{
 
-    .player-meta {
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 12px;
-    }
+  font-weight:1000;
 
-    .prop-count {
-      color: #bdbdc2;
+  letter-spacing:-1.5px;
 
-      font-size: 11px;
-      font-weight: 800;
+  font-size:27px;
 
-      white-space:
-        nowrap;
-    }
+}
 
-    .back-button {
-      display: inline-flex;
-      align-items: center;
-      gap: 7px;
+.logo span{
 
-      border: 0;
-      background: transparent;
+  color:#777;
 
-      color: #c9c9ce;
+}
 
-      padding: 0;
+.engine{
 
-      margin:
-        0 0 18px;
+  border:1px solid var(--line);
 
-      font-size: 14px;
-      font-weight: 800;
+  border-radius:999px;
 
-      cursor: pointer;
-    }
+  padding:7px 10px;
 
-    .hero {
-      border:
-        1px solid var(--border);
+  font-size:10px;
 
-      border-radius:
-        18px;
+  letter-spacing:.7px;
 
-      padding: 19px;
+  color:#bbb;
 
-      background:
-        linear-gradient(
-          180deg,
-          #121212 0%,
-          #0a0a0a 100%
-        );
+  font-weight:900;
 
-      margin-bottom:
-        13px;
-    }
+}
 
-    .hero-player {
-      font-size: 27px;
-      font-weight: 950;
-      letter-spacing: -1px;
-      line-height: 1.05;
-    }
+.hero{
 
-    .hero-meta {
-      margin-top: 8px;
-      color: var(--muted);
-      font-size: 13px;
-    }
+  border:1px solid var(--line);
 
-    .intel-grid {
-      display: grid;
+  border-radius:20px;
 
-      grid-template-columns:
-        1fr 1fr;
+  background:linear-gradient(145deg,#101010,#080808);
 
-      gap: 10px;
+  padding:20px;
 
-      margin-top:
-        17px;
-    }
+  margin-bottom:14px;
 
-    .intel-box {
-      border:
-        1px solid var(--border);
+}
 
-      border-radius:
-        13px;
+.kicker{
 
-      background:
-        #090909;
+  color:#8f8f8f;
 
-      padding: 13px;
-    }
+  font-size:10px;
 
-    .intel-label {
-      font-size: 9px;
-      letter-spacing: 1.2px;
+  letter-spacing:1.6px;
 
-      color:
-        var(--muted);
+  font-weight:1000;
 
-      font-weight: 900;
+  text-transform:uppercase;
 
-      text-transform:
-        uppercase;
-    }
+}
 
-    .intel-value {
-      margin-top: 6px;
-      font-size: 18px;
-      font-weight: 900;
-    }
+.game{
 
-    .intel-small {
-      margin-top: 5px;
-      color: var(--muted);
-      font-size: 11px;
-      line-height: 1.35;
-    }
+  font-size:32px;
 
-    .analysis-card {
-      padding: 17px;
-    }
+  line-height:1;
 
-    .analysis-header {
-      display: flex;
+  letter-spacing:-1.5px;
 
-      align-items:
-        flex-start;
+  font-weight:1000;
 
-      justify-content:
-        space-between;
+  margin-top:10px;
 
-      gap: 12px;
+}
 
-      margin-bottom:
-        11px;
-    }
+.gameSub{
 
-    .analysis-title {
-      font-size: 13px;
-      font-weight: 900;
+  color:#aaa;
 
-      letter-spacing:
-        .5px;
+  font-size:13px;
 
-      text-transform:
-        uppercase;
-    }
+  line-height:1.5;
 
-    .score-pill {
-      flex-shrink: 0;
+  margin-top:9px;
 
-      border:
-        1px solid var(--border2);
+}
 
-      border-radius:
-        999px;
+.qbs{
 
-      padding:
-        6px 9px;
+  display:grid;
 
-      font-size: 10px;
-      font-weight: 900;
+  grid-template-columns:1fr 1fr;
 
-      letter-spacing:
-        .5px;
-    }
+  gap:8px;
 
-    .analysis-copy {
-      color: #d0d0d4;
+  margin-top:16px;
 
-      font-size: 13px;
-      line-height: 1.55;
-    }
+}
 
-    .evidence {
-      display: grid;
+.qb{
 
-      grid-template-columns:
-        repeat(3, 1fr);
+  border:1px solid var(--line);
 
-      gap: 8px;
+  border-radius:12px;
 
-      margin-top: 14px;
-    }
+  background:#090909;
 
-    .evidence-box {
-      padding:
-        11px 8px;
+  padding:11px;
 
-      text-align: center;
+}
 
-      border:
-        1px solid #222;
+.qb small{
 
-      border-radius:
-        11px;
+  color:#777;
 
-      background:
-        #090909;
-    }
+  display:block;
 
-    .evidence-value {
-      font-size: 15px;
-      font-weight: 900;
-    }
+  font-size:9px;
 
-    .evidence-label {
-      margin-top: 4px;
+  letter-spacing:1px;
 
-      color:
-        var(--muted);
+  font-weight:900;
 
-      font-size: 9px;
+}
 
-      text-transform:
-        uppercase;
+.qb strong{
 
-      letter-spacing:
-        .6px;
-    }
+  display:block;
 
-    .prop-card {
-      padding: 17px;
-    }
+  margin-top:4px;
 
-    .prop-header {
-      display: flex;
+  font-size:13px;
 
-      align-items:
-        flex-start;
+}
 
-      justify-content:
-        space-between;
+.warning{
 
-      gap: 12px;
-    }
+  margin-top:12px;
 
-    .prop-name {
-      font-size: 16px;
-      font-weight: 900;
-    }
+  padding:11px 12px;
 
-    .prop-projection {
-      text-align: right;
-    }
+  border:1px solid #383838;
 
-    .projection-number {
-      font-size: 22px;
-      font-weight: 950;
-    }
+  border-radius:12px;
 
-    .projection-label {
-      margin-top: 3px;
+  background:#111;
 
-      color:
-        var(--muted);
+  color:#bdbdbd;
 
-      font-size: 9px;
+  font-size:11px;
 
-      letter-spacing:
-        .7px;
+  line-height:1.5;
 
-      text-transform:
-        uppercase;
-    }
+}
 
-    .range-grid {
-      display: grid;
+.tabs{
 
-      grid-template-columns:
-        repeat(5, 1fr);
+  display:grid;
 
-      gap: 6px;
+  grid-template-columns:repeat(3,1fr);
 
-      margin-top: 15px;
-    }
+  gap:7px;
 
-    .range-box {
-      border:
-        1px solid #222;
+  margin:15px 0;
 
-      border-radius:
-        9px;
+}
 
-      background:
-        #090909;
+.tab{
 
-      padding:
-        9px 4px;
+  border:1px solid var(--line);
 
-      text-align:
-        center;
-    }
+  color:#999;
 
-    .range-value {
-      font-size: 12px;
-      font-weight: 900;
-    }
+  background:#090909;
 
-    .range-label {
-      color:
-        var(--muted);
+  border-radius:12px;
 
-      font-size: 8px;
+  padding:11px 6px;
 
-      margin-top: 3px;
-    }
+  font-size:11px;
 
-    .prop-context {
-      margin-top: 13px;
-      padding-top: 13px;
+  font-weight:900;
 
-      border-top:
-        1px solid #202020;
+}
 
-      display: flex;
+.tab.active{
 
-      gap: 8px;
+  background:#fff;
 
-      flex-wrap:
-        wrap;
-    }
+  color:#000;
 
-    .mini-pill {
-      border:
-        1px solid #292929;
+  border-color:#fff;
 
-      border-radius:
-        999px;
+}
 
-      padding:
-        6px 8px;
+.filters{
 
-      color:
-        #c4c4c8;
+  display:flex;
 
-      font-size: 9px;
-      font-weight: 800;
+  gap:7px;
 
-      letter-spacing:
-        .35px;
-    }
+  overflow:auto;
 
-    .reference-pill {
-      border-color:
-        #3b3b3b;
+  padding-bottom:7px;
 
-      color: #fff;
-    }
+  scrollbar-width:none;
 
-    .calculator-toggle {
-      width: 100%;
+}
 
-      margin-top:
-        14px;
+.filters::-webkit-scrollbar{
 
-      border:
-        1px solid #2c2c2c;
+  display:none;
 
-      border-radius:
-        11px;
+}
 
-      background:
-        #111;
+.filter{
 
-      color: #fff;
+  white-space:nowrap;
 
-      padding: 11px;
+  border:1px solid var(--line);
 
-      font-size: 10px;
-      font-weight: 900;
+  color:#aaa;
 
-      letter-spacing:
-        .7px;
+  background:#090909;
 
-      cursor: pointer;
-    }
+  border-radius:999px;
 
-    .calculator {
-      display: none;
+  padding:8px 12px;
 
-      margin-top:
-        11px;
+  font-size:10px;
 
-      padding-top:
-        13px;
+  font-weight:900;
 
-      border-top:
-        1px solid #202020;
-    }
+}
 
-    .calculator.open {
-      display: block;
-    }
+.filter.active{
 
-    .side-selector {
-      display: grid;
+  color:#000;
 
-      grid-template-columns:
-        1fr 1fr;
+  background:#fff;
 
-      gap: 8px;
+  border-color:#fff;
 
-      margin-bottom:
-        11px;
-    }
+}
 
-    .side-button {
-      border:
-        1px solid #303030;
+.search{
 
-      border-radius:
-        11px;
+  width:100%;
 
-      background:
-        #090909;
+  border:1px solid var(--line);
 
-      padding:
-        12px;
+  background:#0a0a0a;
 
-      font-size: 11px;
-      font-weight: 950;
+  color:white;
 
-      cursor: pointer;
-    }
+  border-radius:13px;
 
-    .side-button.selected {
-      background: #fff;
-      color: #000;
-      border-color: #fff;
-    }
+  padding:13px;
 
-    .input-grid {
-      display: grid;
+  outline:none;
 
-      grid-template-columns:
-        1fr 1fr;
+  margin:8px 0 13px;
 
-      gap: 9px;
-    }
+}
 
-    .input-wrap label {
-      display: block;
+.sectionTitle{
 
-      color:
-        var(--muted);
+  display:flex;
 
-      font-size: 9px;
+  align-items:end;
 
-      text-transform:
-        uppercase;
+  justify-content:space-between;
 
-      letter-spacing:
-        .8px;
+  margin:17px 2px 9px;
 
-      margin-bottom: 6px;
+}
 
-      font-weight: 800;
-    }
+.sectionTitle h2{
 
-    .input-wrap input {
-      width: 100%;
+  margin:0;
 
-      border:
-        1px solid #303030;
+  font-size:18px;
 
-      border-radius:
-        10px;
+  letter-spacing:-.5px;
 
-      background:
-        #080808;
+}
 
-      color: #fff;
+.sectionTitle span{
 
-      padding: 11px;
+  color:#777;
 
-      outline: none;
-    }
+  font-size:10px;
 
-    .calc-button {
-      width: 100%;
+}
 
-      margin-top: 9px;
+.card{
 
-      border: 0;
+  border:1px solid var(--line);
 
-      border-radius:
-        10px;
+  background:var(--card);
 
-      background: #fff;
+  border-radius:16px;
 
-      color: #000;
+  padding:15px;
 
-      padding: 12px;
+  margin-bottom:10px;
 
-      font-size: 11px;
-      font-weight: 950;
+}
 
-      cursor: pointer;
-    }
+.playerTop{
 
-    .calc-result {
-      margin-top: 11px;
+  display:flex;
 
-      border:
-        1px solid #242424;
+  justify-content:space-between;
 
-      border-radius:
-        11px;
+  gap:12px;
 
-      padding: 14px;
+  align-items:start;
 
-      display: none;
+}
 
-      font-size: 12px;
-      line-height: 1.55;
+.playerName{
 
-      color: #d2d2d6;
-    }
+  font-size:17px;
 
-    .calc-result.show {
-      display: block;
-    }
+  font-weight:1000;
 
-    .result-head {
-      display: flex;
+  letter-spacing:-.4px;
 
-      justify-content:
-        space-between;
+}
 
-      align-items:
-        flex-start;
+.playerMeta{
 
-      gap: 10px;
+  color:#888;
 
-      margin-bottom:
-        12px;
-    }
+  font-size:10px;
 
-    .result-title {
-      font-size: 16px;
-      font-weight: 950;
-    }
+  margin-top:3px;
 
-    .edge-number {
-      font-size: 18px;
-      font-weight: 950;
-    }
+  font-weight:800;
 
-    .positive {
-      color:
-        var(--good);
-    }
+}
 
-    .negative {
-      color:
-        var(--bad);
-    }
+.badge{
 
-    .neutral {
-      color:
-        var(--soft);
-    }
+  display:inline-block;
 
-    .market-grid {
-      display: grid;
+  border:1px solid #333;
 
-      grid-template-columns:
-        repeat(2, 1fr);
+  background:#151515;
 
-      gap: 8px;
+  border-radius:999px;
 
-      margin-top: 12px;
-    }
+  padding:5px 8px;
 
-    .market-box {
-      border:
-        1px solid #292929;
+  font-size:8px;
 
-      border-radius:
-        11px;
+  letter-spacing:.6px;
 
-      background:
-        #090909;
+  font-weight:1000;
 
-      padding: 11px;
-    }
+  white-space:nowrap;
 
-    .market-value {
-      font-size: 16px;
-      font-weight: 950;
-    }
+}
 
-    .market-label {
-      margin-top: 4px;
+.badge.ready{
 
-      color:
-        var(--muted);
+  background:#f2fff3;
 
-      font-size: 8px;
+  color:#0b4413;
 
-      letter-spacing:
-        .7px;
+  border-color:#f2fff3;
 
-      text-transform:
-        uppercase;
-    }
+}
 
-    .save-button {
-      width: 100%;
+.badge.review{
 
-      margin-top: 10px;
+  background:#fff9dc;
 
-      border:
-        1px solid #444;
+  color:#5a4900;
 
-      border-radius:
-        10px;
+  border-color:#fff9dc;
 
-      background:
-        #151515;
+}
 
-      color: #fff;
+.propGrid{
 
-      padding: 12px;
+  display:grid;
 
-      font-size: 10px;
-      font-weight: 900;
+  grid-template-columns:repeat(3,1fr);
 
-      letter-spacing:
-        .5px;
+  gap:7px;
 
-      cursor: pointer;
-    }
+  margin-top:13px;
 
-    .risk-list {
-      margin: 0;
-      padding-left: 18px;
+}
 
-      color:
-        #c8c8cd;
+.metric{
 
-      font-size: 13px;
-      line-height: 1.55;
-    }
+  border:1px solid var(--line);
 
-    .risk-list li {
-      margin-bottom: 7px;
-    }
+  border-radius:11px;
 
-    .empty {
-      padding:
-        24px 18px;
+  padding:10px;
 
-      border:
-        1px solid var(--border);
+  background:#090909;
 
-      border-radius:
-        16px;
+}
 
-      background:
-        var(--card);
+.metric small{
 
-      color:
-        var(--muted);
+  display:block;
 
-      font-size: 13px;
-      line-height: 1.5;
-    }
+  color:#777;
 
-    .loading {
-      padding:
-        60px 20px;
+  font-size:8px;
 
-      text-align:
-        center;
+  font-weight:900;
 
-      color:
-        var(--muted);
+  letter-spacing:.7px;
 
-      font-size: 13px;
-    }
+  text-transform:uppercase;
 
-    .pick-card {
-      padding: 17px;
-    }
+}
 
-    .pick-top {
-      display: flex;
+.metric strong{
 
-      justify-content:
-        space-between;
+  display:block;
 
-      align-items:
-        flex-start;
+  font-size:16px;
 
-      gap: 12px;
-    }
+  margin-top:4px;
 
-    .pick-number {
-      color:
-        var(--muted);
+}
 
-      font-size: 10px;
-      font-weight: 900;
+.openBtn{
 
-      letter-spacing:
-        .7px;
+  width:100%;
 
-      margin-bottom: 5px;
-    }
+  margin-top:11px;
 
-    .pick-player {
-      font-size: 18px;
-      font-weight: 950;
-    }
+  padding:11px;
 
-    .pick-side {
-      margin-top: 8px;
+  border-radius:11px;
 
-      font-size: 13px;
-      font-weight: 900;
-    }
+  border:1px solid #333;
 
-    .priority {
-      border:
-        1px solid #414141;
+  background:#161616;
 
-      border-radius:
-        999px;
+  color:#fff;
 
-      padding:
-        6px 8px;
+  font-weight:900;
 
-      font-size: 9px;
-      font-weight: 900;
+  font-size:11px;
 
-      letter-spacing:
-        .4px;
+}
 
-      white-space:
-        nowrap;
-    }
+.openBtn:active{
 
-    .candidate-grid {
-      display: grid;
+  transform:scale(.99);
 
-      grid-template-columns:
-        repeat(3, 1fr);
+}
 
-      gap: 7px;
+.back{
 
-      margin-top: 14px;
-    }
+  border:0;
 
-    .candidate-box {
-      border:
-        1px solid #242424;
+  background:transparent;
 
-      border-radius:
-        10px;
+  color:#aaa;
 
-      background:
-        #090909;
+  padding:5px 0 13px;
 
-      padding:
-        10px 6px;
+  font-size:12px;
 
-      text-align:
-        center;
-    }
+  font-weight:800;
 
-    .candidate-value {
-      font-size: 13px;
-      font-weight: 950;
-    }
+}
 
-    .candidate-label {
-      margin-top: 4px;
+.bigName{
 
-      color:
-        var(--muted);
+  font-size:30px;
 
-      font-size: 8px;
+  font-weight:1000;
 
-      text-transform:
-        uppercase;
+  letter-spacing:-1.2px;
 
-      letter-spacing:
-        .5px;
-    }
+}
 
-    .saved-label {
-      margin-top: 10px;
+.sub{
 
-      color:
-        var(--good);
+  color:#8b8b8b;
 
-      font-size: 10px;
-      font-weight: 900;
-    }
+  font-size:11px;
 
-    .bottom-nav {
-      position: fixed;
+  margin-top:5px;
 
-      z-index: 40;
+}
 
-      bottom: 0;
-      left: 50%;
+.analysisCard{
 
-      transform:
-        translateX(-50%);
+  border:1px solid var(--line);
 
-      width: 100%;
-      max-width: 760px;
+  background:var(--card);
 
-      display: grid;
+  border-radius:16px;
 
-      grid-template-columns:
-        repeat(3, 1fr);
+  padding:16px;
 
-      background:
-        rgba(8, 8, 8, .97);
+  margin-top:10px;
 
-      border-top:
-        1px solid #202020;
+}
 
-      padding:
-        8px
-        8px
-        calc(
-          8px +
-          env(safe-area-inset-bottom)
-        );
+.analysisCard h3{
 
-      backdrop-filter:
-        blur(18px);
-    }
+  margin:0 0 12px;
 
-    .nav-button {
-      border: 0;
-      background: transparent;
+  font-size:13px;
 
-      color: #666;
+  letter-spacing:.3px;
 
-      padding:
-        9px 5px;
+}
 
-      font-size: 9px;
+.analysisCard p{
 
-      letter-spacing:
-        .7px;
+  color:#c4c4c4;
 
-      font-weight: 900;
+  font-size:12px;
 
-      cursor: pointer;
-    }
+  line-height:1.55;
 
-    .nav-button.active {
-      color: #fff;
-    }
+  margin:7px 0;
 
-    .nav-icon {
-      display: block;
+}
 
-      font-size: 17px;
+.analysisCard ul{
 
-      margin-bottom: 4px;
-    }
+  margin:7px 0 0;
 
-    @media (max-width: 420px) {
-      .page-title {
-        font-size: 28px;
-      }
+  padding-left:18px;
 
-      .hero-player {
-        font-size: 25px;
-      }
-    }
-  </style>
+}
+
+.analysisCard li{
+
+  color:#bcbcbc;
+
+  font-size:11px;
+
+  line-height:1.5;
+
+  margin:6px 0;
+
+}
+
+.projectionHero{
+
+  display:grid;
+
+  grid-template-columns:1.15fr .85fr;
+
+  gap:8px;
+
+}
+
+.projMain{
+
+  border:1px solid #363636;
+
+  border-radius:15px;
+
+  background:#111;
+
+  padding:15px;
+
+}
+
+.projMain small{
+
+  display:block;
+
+  color:#777;
+
+  font-size:9px;
+
+  font-weight:900;
+
+}
+
+.projMain strong{
+
+  display:block;
+
+  font-size:31px;
+
+  margin-top:4px;
+
+  letter-spacing:-1px;
+
+}
+
+.range{
+
+  display:grid;
+
+  grid-template-columns:repeat(5,1fr);
+
+  gap:5px;
+
+  margin-top:8px;
+
+}
+
+.range div{
+
+  border:1px solid var(--line);
+
+  border-radius:9px;
+
+  padding:8px 3px;
+
+  text-align:center;
+
+  background:#080808;
+
+}
+
+.range small{
+
+  display:block;
+
+  color:#666;
+
+  font-size:7px;
+
+  font-weight:900;
+
+}
+
+.range strong{
+
+  font-size:11px;
+
+}
+
+.tdHero{
+
+  display:grid;
+
+  grid-template-columns:1fr 1fr;
+
+  gap:8px;
+
+}
+
+.tdBox{
+
+  border:1px solid #363636;
+
+  border-radius:14px;
+
+  padding:14px;
+
+  background:#111;
+
+}
+
+.tdBox small{
+
+  display:block;
+
+  color:#888;
+
+  font-size:8px;
+
+  font-weight:1000;
+
+  letter-spacing:.8px;
+
+}
+
+.tdBox strong{
+
+  display:block;
+
+  font-size:25px;
+
+  margin-top:4px;
+
+}
+
+.tdBox span{
+
+  display:block;
+
+  color:#aaa;
+
+  font-size:10px;
+
+  margin-top:4px;
+
+}
+
+.market{
+
+  border:1px solid #3a3a3a;
+
+  background:#101010;
+
+  border-radius:16px;
+
+  padding:16px;
+
+  margin-top:10px;
+
+}
+
+.market h3{
+
+  margin:0 0 4px;
+
+  font-size:14px;
+
+}
+
+.marketIntro{
+
+  color:#777;
+
+  font-size:10px;
+
+  line-height:1.4;
+
+  margin-bottom:12px;
+
+}
+
+.fieldLabel{
+
+  display:block;
+
+  color:#888;
+
+  font-size:9px;
+
+  font-weight:900;
+
+  margin:10px 0 5px;
+
+  letter-spacing:.6px;
+
+}
+
+.market input,
+
+.market select{
+
+  width:100%;
+
+  border:1px solid #333;
+
+  border-radius:10px;
+
+  background:#080808;
+
+  color:#fff;
+
+  padding:12px;
+
+  outline:none;
+
+}
+
+.marketGrid{
+
+  display:grid;
+
+  grid-template-columns:1fr 1fr;
+
+  gap:8px;
+
+}
+
+.calcBtn{
+
+  width:100%;
+
+  margin-top:12px;
+
+  border:0;
+
+  background:#fff;
+
+  color:#000;
+
+  border-radius:11px;
+
+  padding:12px;
+
+  font-weight:1000;
+
+}
+
+.result{
+
+  display:none;
+
+  margin-top:12px;
+
+  border-top:1px solid #292929;
+
+  padding-top:12px;
+
+}
+
+.result.show{
+
+  display:block;
+
+}
+
+.resultGrid{
+
+  display:grid;
+
+  grid-template-columns:repeat(2,1fr);
+
+  gap:7px;
+
+}
+
+.resultMetric{
+
+  border:1px solid #292929;
+
+  border-radius:10px;
+
+  padding:10px;
+
+  background:#090909;
+
+}
+
+.resultMetric small{
+
+  display:block;
+
+  color:#777;
+
+  font-size:8px;
+
+  font-weight:900;
+
+}
+
+.resultMetric strong{
+
+  display:block;
+
+  margin-top:4px;
+
+  font-size:15px;
+
+}
+
+.screen{
+
+  margin-top:9px;
+
+  padding:11px;
+
+  border-radius:10px;
+
+  font-size:11px;
+
+  font-weight:1000;
+
+  text-align:center;
+
+}
+
+.screen.pass{
+
+  background:#ecffef;
+
+  color:#104817;
+
+}
+
+.screen.review{
+
+  background:#fff8d5;
+
+  color:#5c4c00;
+
+}
+
+.screen.no{
+
+  background:#1a1a1a;
+
+  color:#aaa;
+
+  border:1px solid #333;
+
+}
+
+.propSelector{
+
+  display:flex;
+
+  gap:6px;
+
+  overflow:auto;
+
+  margin-top:12px;
+
+  padding-bottom:4px;
+
+}
+
+.propChip{
+
+  border:1px solid #2c2c2c;
+
+  background:#0b0b0b;
+
+  color:#999;
+
+  border-radius:999px;
+
+  padding:8px 10px;
+
+  font-size:9px;
+
+  font-weight:900;
+
+  white-space:nowrap;
+
+}
+
+.propChip.active{
+
+  background:#fff;
+
+  color:#000;
+
+}
+
+.tdRank{
+
+  display:flex;
+
+  align-items:center;
+
+  justify-content:space-between;
+
+  gap:10px;
+
+}
+
+.tdRankLeft{
+
+  display:flex;
+
+  gap:11px;
+
+  align-items:center;
+
+}
+
+.rank{
+
+  font-size:20px;
+
+  color:#555;
+
+  font-weight:1000;
+
+  width:27px;
+
+}
+
+.tdPct{
+
+  font-size:23px;
+
+  font-weight:1000;
+
+}
+
+.tdOdds{
+
+  color:#888;
+
+  font-size:9px;
+
+  text-align:right;
+
+}
+
+.empty{
+
+  text-align:center;
+
+  color:#777;
+
+  border:1px solid var(--line);
+
+  border-radius:15px;
+
+  padding:30px 15px;
+
+  margin-top:15px;
+
+}
+
+.note{
+
+  color:#777;
+
+  font-size:9px;
+
+  line-height:1.5;
+
+  margin-top:10px;
+
+}
+
+.bottom{
+
+  position:fixed;
+
+  bottom:0;
+
+  left:0;
+
+  right:0;
+
+  background:rgba(5,5,5,.94);
+
+  backdrop-filter:blur(14px);
+
+  border-top:1px solid #242424;
+
+  padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+
+  z-index:50;
+
+}
+
+.bottomInner{
+
+  max-width:760px;
+
+  margin:auto;
+
+  display:grid;
+
+  grid-template-columns:repeat(3,1fr);
+
+  gap:7px;
+
+}
+
+.navBtn{
+
+  border:0;
+
+  background:transparent;
+
+  color:#666;
+
+  padding:9px 4px;
+
+  font-size:9px;
+
+  font-weight:1000;
+
+  letter-spacing:.6px;
+
+}
+
+.navBtn.active{
+
+  color:#fff;
+
+}
+
+.loading{
+
+  text-align:center;
+
+  color:#777;
+
+  padding:70px 20px;
+
+}
+
+@media(max-width:430px){
+
+  .game{font-size:29px}
+
+  .propGrid{grid-template-columns:repeat(3,1fr)}
+
+}
+
+</style>
+
 </head>
 
 <body>
 
-  <div class="app">
+<div id="app" class="app">
 
-    <header class="topbar">
+  <div class="loading">Loading JPro Gameday Intelligence…</div>
 
-      <div class="topbar-row">
+</div>
 
-        <div class="brand">
-          JPRO
-        </div>
+<div class="bottom">
 
-        <div
-          class="engine-badge"
-          id="engineBadge"
-        >
-          20K ENGINE
-        </div>
+  <div class="bottomInner">
 
-      </div>
+    <button class="navBtn active" id="navPlayers" onclick="showPage('players')">PLAYERS</button>
 
-    </header>
+    <button class="navBtn" id="navTD" onclick="showPage('td')">TD BOARD</button>
 
-    <main
-      class="content"
-      id="content"
-    >
-      <div class="loading">
-        Loading JPro…
-      </div>
-    </main>
+    <button class="navBtn" id="navPicks" onclick="showPage('picks')">MY PICKS</button>
 
   </div>
 
-  <nav class="bottom-nav">
-
-    <button
-      class="nav-button active"
-      id="navGames"
-      onclick="showGames()"
-    >
-      <span class="nav-icon">
-        ◫
-      </span>
-
-      GAMES
-    </button>
-
-    <button
-      class="nav-button"
-      id="navMatchups"
-      onclick="showMatchups()"
-    >
-      <span class="nav-icon">
-        ◎
-      </span>
-
-      MATCHUPS
-    </button>
-
-    <button
-      class="nav-button"
-      id="navPicks"
-      onclick="showPicks()"
-    >
-      <span class="nav-icon">
-        ◆
-      </span>
-
-      JPRO PICKS
-    </button>
-
-  </nav>
+</div>
 
 <script>
 
-let jproData = null;
+let DATA=null;
 
-let currentGame = null;
-let currentPlayerId = null;
+let GAME_ROWS=[];
 
-let selectedSides = {};
+let TD_BOARD=[];
 
-const content =
-  document.getElementById(
-    "content"
-  );
+let PAGE="players";
 
+let FILTER="ALL";
 
-function escapeHtml(value) {
+let SEARCH="";
 
-  return String(
-    value ?? ""
-  )
-  .replaceAll("&", "&amp;")
-  .replaceAll("<", "&lt;")
-  .replaceAll(">", "&gt;")
-  .replaceAll('"', "&quot;")
-  .replaceAll("'", "&#039;");
+let CURRENT_PLAYER=null;
+
+let CURRENT_PROP_INDEX=0;
+
+const $=id=>document.getElementById(id);
+
+function esc(v){
+
+  return String(v??"")
+
+    .replaceAll("&","&amp;")
+
+    .replaceAll("<","&lt;")
+
+    .replaceAll(">","&gt;")
+
+    .replaceAll('"',"&quot;");
+
 }
 
+function n(v,d=1){
 
-function prettyProp(prop) {
+  const x=Number(v);
 
-  const labels = {
+  return Number.isFinite(x)?x.toFixed(d):"—";
 
-    passing_yards:
-      "Passing Yards",
-
-    rushing_yards:
-      "Rushing Yards",
-
-    receiving_yards:
-      "Receiving Yards",
-
-    receptions:
-      "Receptions"
-
-  };
-
-  return labels[prop] || prop;
 }
 
+function odds(v){
 
-function setActiveNav(id) {
+  const x=Number(v);
 
-  document
-    .querySelectorAll(
-      ".nav-button"
-    )
-    .forEach(
-      button => {
-        button.classList.remove(
-          "active"
-        );
-      }
-    );
+  if(!Number.isFinite(x)) return "—";
 
-  const el =
-    document.getElementById(id);
+  return x>0?`+${Math.round(x)}`:`${Math.round(x)}`;
 
-  if (el) {
-    el.classList.add(
-      "active"
-    );
-  }
 }
 
+function pct(v){
 
-function gameProjections(
-  gameName
-) {
+  const x=Number(v);
 
-  return (
-    jproData?.projections || []
-  ).filter(
-    x =>
-      x.game === gameName
-  );
+  if(!Number.isFinite(x)) return "—";
+
+  return `${x.toFixed(1)}%`;
+
 }
 
+function americanToProb(o){
 
-function playerProjections(
-  gameName,
-  playerId
-) {
+  o=Number(o);
 
-  return gameProjections(
-    gameName
-  ).filter(
-    x =>
-      String(
-        x.player_id
-      ) ===
-      String(
-        playerId
-      )
-  );
+  if(!Number.isFinite(o)||o===0)return null;
+
+  return o>0 ? 100/(o+100) : (-o)/((-o)+100);
+
 }
 
+function probToAmerican(p){
 
-function uniquePlayers(
-  gameName
-) {
+  if(!Number.isFinite(p)||p<=0||p>=1)return null;
 
-  const map =
-    new Map();
+  return p>=.5 ? -100*p/(1-p) : 100*(1-p)/p;
 
-  gameProjections(
-    gameName
-  ).forEach(
-    x => {
+}
 
-      const key =
-        String(
-          x.player_id
-        );
+function histProbability(hist,line,side){
 
-      if (
-        !map.has(key)
-      ) {
+  if(!Array.isArray(hist)||!hist.length)return null;
 
-        map.set(
-          key,
-          {
-            player_id:
-              x.player_id,
+  let total=0,hit=0;
 
-            player:
-              x.player,
+  for(const row of hist){
 
-            team:
-              x.team,
+    const value=Number(row[0]);
 
-            opponent:
-              x.opponent,
+    const count=Number(row[1]);
 
-            position:
-              x.position,
+    if(!Number.isFinite(value)||!Number.isFinite(count))continue;
 
-            game:
-              x.game,
+    total+=count;
 
-            props: []
-          }
-        );
-      }
+    if(side==="OVER" && value>line) hit+=count;
 
-      map
-        .get(key)
-        .props
-        .push(x);
+    if(side==="UNDER" && value<line) hit+=count;
+
+    if(value===line){
+
+      // Pushes are excluded from wins.
 
     }
-  );
 
-  return Array
-    .from(
-      map.values()
-    )
-    .sort(
-      (a, b) =>
-        a.team.localeCompare(
-          b.team
-        )
-        ||
-        a.player.localeCompare(
-          b.player
-        )
-    );
-}
-
-
-function getReferenceLine(prop) {
-
-  const market =
-    prop?.market || {};
-
-  const values = [
-
-    market.model_reference_line,
-
-    market.reference_line,
-
-    prop?.model_reference_line,
-
-    prop?.reference_line
-
-  ];
-
-  for (
-    const value of values
-  ) {
-
-    const number =
-      Number(value);
-
-    if (
-      Number.isFinite(
-        number
-      )
-    ) {
-      return number;
-    }
   }
 
-  return null;
+  return total ? hit/total : null;
+
 }
 
+function uniquePlayers(){
 
-function showGames() {
+  const map=new Map();
 
-  currentGame = null;
-  currentPlayerId = null;
+  for(const p of GAME_ROWS){
 
-  setActiveNav(
-    "navGames"
-  );
+    const key=`${p.team}|${p.player}`;
 
-  const games =
-    jproData?.games || [];
+    if(!map.has(key)){
 
-  content.innerHTML = `
+      map.set(key,{
 
-    <div class="eyebrow">
+        player:p.player,
 
-      ${escapeHtml(
-        jproData?.slate ||
-        "Current Slate"
-      )}
+        team:p.team,
 
-    </div>
+        opponent:p.opponent,
 
-    <h1 class="page-title">
-      Games
-    </h1>
+        position:p.position,
 
-    <div class="page-subtitle">
+        props:[]
 
-      Select a matchup to open
-      the JPro player board.
+      });
 
-    </div>
-
-    ${
-      games.length
-      ?
-      games.map(
-        game => {
-
-          const projections =
-            gameProjections(
-              game.game
-            );
-
-          const players =
-            new Set(
-              projections.map(
-                x =>
-                  x.player_id
-              )
-            ).size;
-
-          return `
-
-            <div
-              class="card game-card tap-card"
-              onclick='showGame(
-                ${JSON.stringify(
-                  game.game
-                )}
-              )'
-            >
-
-              <div class="game-top">
-
-                <div>
-
-                  <div class="game-name">
-
-                    ${escapeHtml(
-                      game.game
-                    )}
-
-                  </div>
-
-                  <div class="game-meta">
-
-                    ${players}
-                    modeled players
-                    ·
-                    ${projections.length}
-                    props
-
-                  </div>
-
-                </div>
-
-                <div class="arrow">
-                  ›
-                </div>
-
-              </div>
-
-            </div>
-
-          `;
-        }
-      ).join("")
-      :
-      `
-
-        <div class="empty">
-
-          No games were found
-          in the current JPro slate.
-
-        </div>
-
-      `
     }
 
-  `;
+    map.get(key).props.push(p);
+
+  }
+
+  return [...map.values()];
+
 }
 
+function tdFor(player,team){
 
-function showGame(
-  gameName
-) {
+  return TD_BOARD.find(x=>x.player===player && x.team===team) || null;
 
-  currentGame =
-    gameName;
-
-  currentPlayerId =
-    null;
-
-  setActiveNav(
-    "navGames"
-  );
-
-  const players =
-    uniquePlayers(
-      gameName
-    );
-
-  content.innerHTML = `
-
-    <button
-      class="back-button"
-      onclick="showGames()"
-    >
-      ‹ Back to Games
-    </button>
-
-    <div class="eyebrow">
-      Player Board
-    </div>
-
-    <h1 class="page-title">
-
-      ${escapeHtml(
-        gameName
-      )}
-
-    </h1>
-
-    <div class="page-subtitle">
-
-      Select a player
-      for full JPro analysis.
-
-    </div>
-
-    ${
-      players.length
-      ?
-      players.map(
-        player => {
-
-          const role =
-            player.props[0]?.role ||
-            {};
-
-          return `
-
-            <div
-              class="card player-card tap-card"
-              onclick='showPlayer(
-                ${JSON.stringify(
-                  gameName
-                )},
-                ${JSON.stringify(
-                  String(
-                    player.player_id
-                  )
-                )}
-              )'
-            >
-
-              <div class="player-row">
-
-                <div>
-
-                  <div class="player-name">
-
-                    ${escapeHtml(
-                      player.player
-                    )}
-
-                  </div>
-
-                  <div class="player-meta">
-
-                    ${escapeHtml(
-                      player.team
-                    )}
-
-                    ·
-
-                    ${escapeHtml(
-                      player.position
-                    )}
-
-                    · vs
-
-                    ${escapeHtml(
-                      player.opponent
-                    )}
-
-                  </div>
-
-                </div>
-
-                <div class="prop-count">
-
-                  ${player.props.length}
-                  PROPS ›
-
-                </div>
-
-              </div>
-
-              ${
-                role.role_label
-                ?
-                `
-
-                  <div
-                    class="prop-context"
-                    style="
-                      margin-top:12px;
-                      padding-top:12px;
-                    "
-                  >
-
-                    <span class="mini-pill">
-
-                      ROLE
-
-                      ${escapeHtml(
-                        role.role_label
-                      )}
-
-                      ${Number(
-                        role.role_score ||
-                        0
-                      ).toFixed(1)}
-
-                    </span>
-
-                  </div>
-
-                `
-                :
-                ""
-              }
-
-            </div>
-
-          `;
-
-        }
-      ).join("")
-      :
-      `
-
-        <div class="empty">
-
-          No modeled players
-          found for this game.
-
-        </div>
-
-      `
-    }
-
-  `;
 }
 
+function roleFor(player){
 
-function roleDescription(
-  player,
-  role
-) {
+  const p=player.props[0]||{};
 
-  const label =
-    role.role_label ||
-    "UNKNOWN";
+  const a=p.player_analysis_v1||p.player_analysis||{};
 
-  const score =
-    Number(
-      role.role_score || 0
-    ).toFixed(1);
+  return a.expected_role||{};
 
-  const method =
-    role.method ||
-    role.role_method ||
-    "";
-
-  const priorGames =
-    Number(
-      role.prior_games || 0
-    );
-
-  const currentGames =
-    Number(
-      role.current_games ||
-      role.games_sample ||
-      0
-    );
-
-  const targets =
-    Number(
-      role.targets_blended ||
-      role.targets_recent_avg ||
-      0
-    ).toFixed(1);
-
-  const carries =
-    Number(
-      role.carries_blended ||
-      role.carries_recent_avg ||
-      0
-    ).toFixed(1);
-
-  const attempts =
-    Number(
-      role.attempts_blended ||
-      role.attempts_recent_avg ||
-      0
-    ).toFixed(1);
-
-  let usageCopy = "";
-
-  if (
-    player.position === "QB"
-  ) {
-
-    usageCopy = `
-      JPro's opportunity model
-      grades
-      ${escapeHtml(player.player)}
-      as
-      <strong>
-        ${escapeHtml(label)}
-      </strong>
-      (${score}/100).
-
-      The role model emphasizes
-      passing attempts and
-      rushing opportunity rather
-      than recent yardage alone.
-
-      Blended passing volume:
-      ${attempts} attempts.
-    `;
-
-  }
-  else if (
-    player.position === "RB"
-  ) {
-
-    usageCopy = `
-      JPro's opportunity model
-      grades
-      ${escapeHtml(player.player)}
-      as
-      <strong>
-        ${escapeHtml(label)}
-      </strong>
-      (${score}/100).
-
-      The role model emphasizes
-      carries and targets rather
-      than recent yardage alone.
-
-      Blended opportunity:
-      ${carries} carries and
-      ${targets} targets.
-    `;
-
-  }
-  else {
-
-    usageCopy = `
-      JPro's opportunity model
-      grades
-      ${escapeHtml(player.player)}
-      as
-      <strong>
-        ${escapeHtml(label)}
-      </strong>
-      (${score}/100).
-
-      The role model emphasizes
-      targets, target share and
-      air-yard opportunity rather
-      than recent yardage alone.
-
-      Blended targets:
-      ${targets}.
-    `;
-
-  }
-
-  if (
-    method.includes(
-      "OPPORTUNITY"
-    )
-  ) {
-
-    usageCopy += `
-
-      The blend currently includes
-      ${priorGames} prior-season
-      games and
-      ${currentGames}
-      current-season games
-      when available.
-
-    `;
-
-  }
-
-  return usageCopy;
 }
 
+function matchupFor(player){
 
-function matchupDescription(
-  player,
-  prop
-) {
+  const p=player.props[0]||{};
 
-  const matchup =
-    prop.matchup || {};
+  const a=p.player_analysis_v1||p.player_analysis||{};
 
-  const label =
-    matchup.matchup_label ||
-    "UNKNOWN";
+  return a.matchup_intelligence||{};
 
-  const score =
-    Number(
-      matchup.matchup_score || 0
-    ).toFixed(1);
+}
 
-  const allowed =
-    Number(
-      matchup.allowed_per_game || 0
-    ).toFixed(1);
+function confidenceFor(player){
 
-  const league =
-    Number(
-      matchup.league_per_game || 0
-    ).toFixed(1);
+  const p=player.props[0]||{};
 
-  const games =
-    Number(
-      matchup.current_season_games ||
-      0
-    );
+  const a=p.player_analysis_v1||p.player_analysis||{};
 
-  let direction =
-    "roughly in line with";
+  return a.projection_confidence||{};
 
-  const ratio =
-    Number(
-      matchup.allowed_vs_league_ratio ||
-      1
-    );
+}
 
-  if (
-    ratio > 1.05
-  ) {
+function statusClass(status){
 
-    direction =
-      "above";
+  if(status==="MODEL_READY")return "ready";
 
-  }
+  return "review";
 
-  if (
-    ratio < .95
-  ) {
+}
 
-    direction =
-      "below";
+function header(){
 
-  }
+  const engine=DATA?.jpro_gameday_engine||{};
+
+  const game=DATA?.jpro_gameday_game||{};
 
   return `
 
-    ${escapeHtml(
-      player.opponent
-    )}'s blended defensive profile is
+    <div class="header">
 
-    <strong>
-      ${escapeHtml(label)}
-    </strong>
+      <div class="logo">JPRO <span>MODEL</span></div>
 
-    for
+      <div class="engine">GAMEDAY V1.1</div>
 
-    ${escapeHtml(
-      prettyProp(
-        prop.prop
-      ).toLowerCase()
-    )}
-
-    (${score}/100).
-
-    The defense has allowed
-    ${allowed}
-    per game in this modeled
-    category,
-
-    ${direction}
-
-    the
-    ${league}
-    league baseline.
-
-    Current-season information
-    is based on
-    ${games}
-    game${games === 1 ? "" : "s"}
-    and is shrunk toward
-    historical data.
-
-  `;
-}
-
-
-function getPrimaryProp(
-  props
-) {
-
-  if (
-    !props.length
-  ) {
-    return null;
-  }
-
-  let best = null;
-  let bestScore =
-    -Infinity;
-
-  props.forEach(
-    prop => {
-
-      const role =
-        Number(
-          prop.role?.role_score ||
-          0
-        );
-
-      const matchup =
-        Number(
-          prop.matchup?.matchup_score ||
-          50
-        );
-
-      const score =
-        role * .60 +
-        matchup * .40;
-
-      if (
-        score > bestScore
-      ) {
-
-        bestScore =
-          score;
-
-        best =
-          prop;
-      }
-
-    }
-  );
-
-  return best;
-}
-
-
-function riskFactors(
-  player,
-  primaryProp
-) {
-
-  const risks = [];
-
-  const role =
-    primaryProp?.role ||
-    {};
-
-  const matchup =
-    primaryProp?.matchup ||
-    {};
-
-  const currentGames =
-    Number(
-      role.current_games ||
-      role.games_sample ||
-      0
-    );
-
-  if (
-    currentGames <= 2
-  ) {
-
-    risks.push(
-      "The current-season role sample is still small. JPro blends prior-season opportunity to reduce early-season overreaction."
-    );
-
-  }
-
-  const matchupGames =
-    Number(
-      matchup.current_season_games ||
-      0
-    );
-
-  if (
-    matchupGames <= 2
-  ) {
-
-    risks.push(
-      "Opponent matchup data has a small current-season sample and therefore uses historical shrinkage."
-    );
-
-  }
-
-  const p10 =
-    Number(
-      primaryProp?.p10 || 0
-    );
-
-  const p90 =
-    Number(
-      primaryProp?.p90 || 0
-    );
-
-  if (
-    primaryProp &&
-    p90 - p10 > 0
-  ) {
-
-    risks.push(
-
-      `The simulated outcome range is wide: the 10th–90th percentile runs from ${p10} to ${p90} ${prettyProp(primaryProp.prop).toLowerCase()}.`
-
-    );
-
-  }
-
-  risks.push(
-    "Late injuries, inactive decisions, game script and unexpected workload changes can materially change a pregame projection."
-  );
-
-  return risks;
-}
-
-
-function showPlayer(
-  gameName,
-  playerId
-) {
-
-  currentGame =
-    gameName;
-
-  currentPlayerId =
-    playerId;
-
-  setActiveNav(
-    "navGames"
-  );
-
-  const props =
-    playerProjections(
-      gameName,
-      playerId
-    );
-
-  if (
-    !props.length
-  ) {
-
-    content.innerHTML = `
-
-      <div class="empty">
-        Player analysis unavailable.
-      </div>
-
-    `;
-
-    return;
-  }
-
-  const player = {
-
-    player:
-      props[0].player,
-
-    team:
-      props[0].team,
-
-    opponent:
-      props[0].opponent,
-
-    position:
-      props[0].position
-
-  };
-
-  const role =
-    props[0].role || {};
-
-  const primary =
-    getPrimaryProp(
-      props
-    );
-
-  const primaryMatchup =
-    primary?.matchup ||
-    {};
-
-  const risks =
-    riskFactors(
-      player,
-      primary
-    );
-
-  content.innerHTML = `
-
-    <button
-      class="back-button"
-      onclick='showGame(
-        ${JSON.stringify(
-          gameName
-        )}
-      )'
-    >
-
-      ‹ Back to
-      ${escapeHtml(
-        gameName
-      )}
-
-    </button>
+    </div>
 
     <div class="hero">
 
-      <div class="eyebrow">
-        JPro Player Analysis
-      </div>
+      <div class="kicker">Tonight • Pregame Intelligence</div>
 
-      <div class="hero-player">
+      <div class="game">EAGLES @ BEARS</div>
 
-        ${escapeHtml(
-          player.player
-        )}
+      <div class="gameSub">
 
-      </div>
+        ${esc(game.kickoff||"8:15 PM ET")} •
 
-      <div class="hero-meta">
+        ${GAME_ROWS.length} model markets •
 
-        ${escapeHtml(
-          player.team
-        )}
-
-        ·
-
-        ${escapeHtml(
-          player.position
-        )}
-
-        · vs
-
-        ${escapeHtml(
-          player.opponent
-        )}
+        ${TD_BOARD.length} TD profiles
 
       </div>
 
-      <div class="intel-grid">
+      <div class="qbs">
 
-        <div class="intel-box">
+        <div class="qb">
 
-          <div class="intel-label">
-            Expected Role
-          </div>
+          <small>PHILADELPHIA QB</small>
 
-          <div class="intel-value">
-
-            ${escapeHtml(
-              role.role_label ||
-              "UNKNOWN"
-            )}
-
-          </div>
-
-          <div class="intel-small">
-
-            ${Number(
-              role.role_score || 0
-            ).toFixed(1)}
-
-            / 100
-
-          </div>
+          <strong>${esc(game.expected_starting_qb_away||"Jalen Hurts")}</strong>
 
         </div>
 
-        <div class="intel-box">
+        <div class="qb">
 
-          <div class="intel-label">
-            Primary Matchup
-          </div>
+          <small>CHICAGO EXPECTED QB</small>
 
-          <div class="intel-value">
-
-            ${escapeHtml(
-              primaryMatchup.matchup_label ||
-              "UNKNOWN"
-            )}
-
-          </div>
-
-          <div class="intel-small">
-
-            ${Number(
-              primaryMatchup.matchup_score ||
-              0
-            ).toFixed(1)}
-
-            / 100
-
-          </div>
+          <strong>${esc(game.expected_starting_qb_home||"Case Keenum")}</strong>
 
         </div>
 
       </div>
 
-    </div>
+      <div class="warning">
 
-    <div class="card analysis-card">
+        JPro is using the verified V1.5.1 availability gate and 20K distributions.
 
-      <div class="analysis-header">
+        TD V1.1 is experimental. Availability-sensitive markets require extra review,
 
-        <div class="analysis-title">
-          Expected Role
-        </div>
-
-        <div class="score-pill">
-
-          ${escapeHtml(
-            role.role_label ||
-            "UNKNOWN"
-          )}
-
-          ·
-
-          ${Number(
-            role.role_score ||
-            0
-          ).toFixed(1)}
-
-        </div>
+        and sportsbook prices must be entered manually.
 
       </div>
-
-      <div class="analysis-copy">
-
-        ${roleDescription(
-          player,
-          role
-        )}
-
-      </div>
-
-    </div>
-
-    ${
-      primary
-      ?
-      `
-
-        <div class="card analysis-card">
-
-          <div class="analysis-header">
-
-            <div class="analysis-title">
-              Matchup Intelligence
-            </div>
-
-            <div class="score-pill">
-
-              ${escapeHtml(
-                primaryMatchup.matchup_label ||
-                "UNKNOWN"
-              )}
-
-              ·
-
-              ${Number(
-                primaryMatchup.matchup_score ||
-                0
-              ).toFixed(1)}
-
-            </div>
-
-          </div>
-
-          <div class="analysis-copy">
-
-            ${matchupDescription(
-              player,
-              primary
-            )}
-
-          </div>
-
-        </div>
-
-      `
-      :
-      ""
-    }
-
-    <div class="section-title">
-      JPro Projections
-    </div>
-
-    ${props.map(
-      (prop, index) =>
-        renderPropCard(
-          prop,
-          index
-        )
-    ).join("")}
-
-    <div class="section-title">
-      Risk Factors
-    </div>
-
-    <div class="card analysis-card">
-
-      <ul class="risk-list">
-
-        ${risks.map(
-          risk =>
-            `
-              <li>
-                ${escapeHtml(risk)}
-              </li>
-            `
-        ).join("")}
-
-      </ul>
 
     </div>
 
   `;
+
 }
 
-
-function renderPropCard(
-  prop,
-  index
-) {
-
-  const matchup =
-    prop.matchup || {};
-
-  const referenceLine =
-    getReferenceLine(
-      prop
-    );
-
-  const referenceLean =
-    prop.market?.model_reference_lean ||
-    prop.market?.reference_lean ||
-    "";
+function tabs(){
 
   return `
 
-    <div class="card prop-card">
+    <div class="tabs">
 
-      <div class="prop-header">
+      <button class="tab ${PAGE==="players"?"active":""}" onclick="showPage('players')">PLAYERS</button>
 
-        <div>
+      <button class="tab ${PAGE==="td"?"active":""}" onclick="showPage('td')">TD BOARD</button>
 
-          <div class="prop-name">
-
-            ${escapeHtml(
-              prettyProp(
-                prop.prop
-              )
-            )}
-
-          </div>
-
-          <div
-            class="player-meta"
-            style="margin-top:6px;"
-          >
-
-            20,000 simulated outcomes
-
-          </div>
-
-        </div>
-
-        <div class="prop-projection">
-
-          <div class="projection-number">
-
-            ${Number(
-              prop.projection || 0
-            ).toFixed(1)}
-
-          </div>
-
-          <div class="projection-label">
-            Projection
-          </div>
-
-        </div>
-
-      </div>
-
-      <div class="range-grid">
-
-        ${rangeBox(
-          prop.p10,
-          "P10"
-        )}
-
-        ${rangeBox(
-          prop.p25,
-          "P25"
-        )}
-
-        ${rangeBox(
-          prop.median,
-          "MED"
-        )}
-
-        ${rangeBox(
-          prop.p75,
-          "P75"
-        )}
-
-        ${rangeBox(
-          prop.p90,
-          "P90"
-        )}
-
-      </div>
-
-      <div class="prop-context">
-
-        <span class="mini-pill">
-
-          MATCHUP
-
-          ${escapeHtml(
-            matchup.matchup_label ||
-            "UNKNOWN"
-          )}
-
-          ${Number(
-            matchup.matchup_score ||
-            0
-          ).toFixed(1)}
-
-        </span>
-
-        <span class="mini-pill">
-
-          MEDIAN
-
-          ${Number(
-            prop.median || 0
-          ).toFixed(1)}
-
-        </span>
-
-        ${
-          referenceLine !== null
-          ?
-          `
-
-            <span
-              class="mini-pill reference-pill"
-            >
-
-              MODEL REF
-
-              ${referenceLine}
-
-              ${escapeHtml(
-                referenceLean
-              )}
-
-            </span>
-
-          `
-          :
-          ""
-        }
-
-      </div>
-
-      <button
-        class="calculator-toggle"
-        onclick="toggleCalculator(
-          '${index}'
-        )"
-      >
-
-        CHECK SPORTSBOOK LINE
-
-      </button>
-
-      <div
-        class="calculator"
-        id="calculator-${index}"
-      >
-
-        <div class="side-selector">
-
-          <button
-            id="over-${index}"
-            class="side-button"
-            onclick="selectSide(
-              '${index}',
-              'OVER'
-            )"
-          >
-            OVER
-          </button>
-
-          <button
-            id="under-${index}"
-            class="side-button"
-            onclick="selectSide(
-              '${index}',
-              'UNDER'
-            )"
-          >
-            UNDER
-          </button>
-
-        </div>
-
-        <div class="input-grid">
-
-          <div class="input-wrap">
-
-            <label>
-              Sportsbook Line
-            </label>
-
-            <input
-              id="line-${index}"
-              type="number"
-              step="0.5"
-              placeholder="${
-                referenceLine !== null
-                ?
-                referenceLine
-                :
-                "69.5"
-              }"
-            />
-
-          </div>
-
-          <div class="input-wrap">
-
-            <label>
-              Side Odds
-            </label>
-
-            <input
-              id="odds-${index}"
-              type="number"
-              step="1"
-              placeholder="-110"
-            />
-
-          </div>
-
-        </div>
-
-        <button
-          class="calc-button"
-          onclick="calculateProp(
-            '${index}',
-            '${escapeHtml(
-              prop.player_id
-            )}',
-            '${escapeHtml(
-              prop.prop
-            )}'
-          )"
-        >
-
-          RUN JPRO LINE CHECK
-
-        </button>
-
-        <div
-          class="calc-result"
-          id="result-${index}"
-        ></div>
-
-      </div>
+      <button class="tab ${PAGE==="picks"?"active":""}" onclick="showPage('picks')">MY PICKS</button>
 
     </div>
 
   `;
+
 }
 
+function renderPlayers(){
 
-function rangeBox(
-  value,
-  label
-) {
+  let players=uniquePlayers();
 
-  return `
+  if(FILTER!=="ALL"){
 
-    <div class="range-box">
-
-      <div class="range-value">
-
-        ${Number(
-          value || 0
-        ).toFixed(0)}
-
-      </div>
-
-      <div class="range-label">
-
-        ${label}
-
-      </div>
-
-    </div>
-
-  `;
-}
-
-
-function toggleCalculator(
-  index
-) {
-
-  const calculator =
-    document.getElementById(
-      `calculator-${index}`
-    );
-
-  if (
-    !calculator
-  ) {
-    return;
-  }
-
-  calculator.classList.toggle(
-    "open"
-  );
-}
-
-
-function selectSide(
-  index,
-  side
-) {
-
-  selectedSides[index] =
-    side;
-
-  const over =
-    document.getElementById(
-      `over-${index}`
-    );
-
-  const under =
-    document.getElementById(
-      `under-${index}`
-    );
-
-  over?.classList.remove(
-    "selected"
-  );
-
-  under?.classList.remove(
-    "selected"
-  );
-
-  if (
-    side === "OVER"
-  ) {
-
-    over?.classList.add(
-      "selected"
-    );
+    players=players.filter(p=>p.team===FILTER||p.position===FILTER);
 
   }
-  else {
 
-    under?.classList.add(
-      "selected"
-    );
+  if(SEARCH){
 
-  }
-}
+    const q=SEARCH.toLowerCase();
 
+    players=players.filter(p=>
 
-function histogramProbabilities(
-  histogram,
-  line
-) {
+      String(p.player).toLowerCase().includes(q) ||
 
-  let over = 0;
-  let under = 0;
-  let push = 0;
-  let total = 0;
+      String(p.position).toLowerCase().includes(q)
 
-  (
-    histogram || []
-  ).forEach(
-    entry => {
-
-      const value =
-        Number(
-          entry[0]
-        );
-
-      const count =
-        Number(
-          entry[1]
-        );
-
-      total += count;
-
-      if (
-        value > line
-      ) {
-
-        over += count;
-
-      }
-      else if (
-        value < line
-      ) {
-
-        under += count;
-
-      }
-      else {
-
-        push += count;
-
-      }
-
-    }
-  );
-
-  if (
-    !total
-  ) {
-
-    return {
-
-      over: 0,
-      under: 0,
-      push: 0,
-      total: 0
-
-    };
-  }
-
-  return {
-
-    over:
-      over / total,
-
-    under:
-      under / total,
-
-    push:
-      push / total,
-
-    total
-
-  };
-}
-
-
-function impliedProbability(
-  americanOdds
-) {
-
-  const odds =
-    Number(
-      americanOdds
-    );
-
-  if (
-    !Number.isFinite(
-      odds
-    )
-    ||
-    odds === 0
-  ) {
-
-    return null;
-  }
-
-  if (
-    odds < 0
-  ) {
-
-    return (
-      Math.abs(odds) /
-      (
-        Math.abs(odds) +
-        100
-      )
     );
 
   }
 
-  return (
-    100 /
-    (
-      odds +
-      100
-    )
-  );
-}
+  players.sort((a,b)=>{
 
+    const ra=Number(roleFor(a).score||0);
 
-function probabilityToAmerican(
-  probability
-) {
+    const rb=Number(roleFor(b).score||0);
 
-  const p =
-    Number(
-      probability
-    );
+    return rb-ra;
 
-  if (
-    !Number.isFinite(p)
-    ||
-    p <= 0
-    ||
-    p >= 1
-  ) {
-
-    return null;
-  }
-
-  if (
-    p >= .5
-  ) {
-
-    return Math.round(
-      -100 *
-      p /
-      (1 - p)
-    );
-
-  }
-
-  return Math.round(
-    100 *
-    (1 - p) /
-    p
-  );
-}
-
-
-function getSavedChecks() {
-
-  try {
-
-    return JSON.parse(
-      localStorage.getItem(
-        "jproSavedChecks"
-      ) || "[]"
-    );
-
-  }
-  catch {
-
-    return [];
-
-  }
-}
-
-
-function saveCheck(
-  check
-) {
-
-  const saved =
-    getSavedChecks();
-
-  const key = [
-
-    check.player_id,
-    check.prop,
-    check.side,
-    check.line,
-    check.odds
-
-  ].join("|");
-
-  const filtered =
-    saved.filter(
-      item =>
-        item.key !== key
-    );
-
-  filtered.unshift({
-    ...check,
-    key,
-    saved_at:
-      new Date().toISOString()
   });
 
-  localStorage.setItem(
-    "jproSavedChecks",
-    JSON.stringify(
-      filtered.slice(
-        0,
-        100
-      )
-    )
-  );
+  let html=header()+tabs()+`
 
-  showPicks();
-}
+    <div class="filters">
 
+      ${["ALL","PHI","CHI","QB","RB","WR","TE"].map(x=>
 
-function calculateProp(
-  index,
-  playerId,
-  propName
-) {
+        `<button class="filter ${FILTER===x?"active":""}" onclick="setFilter('${x}')">${x}</button>`
 
-  const result =
-    document.getElementById(
-      `result-${index}`
-    );
-
-  const side =
-    selectedSides[index];
-
-  if (
-    !side
-  ) {
-
-    result.innerHTML =
-      "Choose OVER or UNDER first.";
-
-    result.classList.add(
-      "show"
-    );
-
-    return;
-  }
-
-  const line =
-    Number(
-      document.getElementById(
-        `line-${index}`
-      )?.value
-    );
-
-  const odds =
-    Number(
-      document.getElementById(
-        `odds-${index}`
-      )?.value
-    );
-
-  if (
-    !Number.isFinite(line)
-  ) {
-
-    result.innerHTML =
-      "Enter a valid sportsbook line.";
-
-    result.classList.add(
-      "show"
-    );
-
-    return;
-  }
-
-  if (
-    !Number.isFinite(odds)
-    ||
-    odds === 0
-  ) {
-
-    result.innerHTML =
-      "Enter the American odds for the side you selected.";
-
-    result.classList.add(
-      "show"
-    );
-
-    return;
-  }
-
-  const prop =
-    playerProjections(
-      currentGame,
-      playerId
-    ).find(
-      x =>
-        x.prop === propName
-    );
-
-  if (
-    !prop
-  ) {
-
-    result.innerHTML =
-      "Projection unavailable.";
-
-    result.classList.add(
-      "show"
-    );
-
-    return;
-  }
-
-  const probs =
-    histogramProbabilities(
-      prop.simulation_histogram,
-      line
-    );
-
-  if (
-    !probs.total
-  ) {
-
-    result.innerHTML =
-      "The 20K simulation distribution is unavailable.";
-
-    result.classList.add(
-      "show"
-    );
-
-    return;
-  }
-
-  const modelProbability =
-    side === "OVER"
-    ?
-    probs.over
-    :
-    probs.under;
-
-  const implied =
-    impliedProbability(
-      odds
-    );
-
-  if (
-    implied === null
-  ) {
-
-    result.innerHTML =
-      "The entered odds are invalid.";
-
-    result.classList.add(
-      "show"
-    );
-
-    return;
-  }
-
-  const edge =
-    modelProbability -
-    implied;
-
-  const fairOdds =
-    probabilityToAmerican(
-      modelProbability
-    );
-
-  const roleScore =
-    Number(
-      prop.role?.role_score ||
-      0
-    );
-
-  const matchupScore =
-    Number(
-      prop.matchup?.matchup_score ||
-      50
-    );
-
-  let screen =
-    "PASS";
-
-  if (
-    modelProbability >= .55
-    &&
-    roleScore >= 45
-  ) {
-
-    screen =
-      "MODEL CANDIDATE";
-  }
-
-  const edgeClass =
-    edge > 0
-    ?
-    "positive"
-    :
-    edge < 0
-    ?
-    "negative"
-    :
-    "neutral";
-
-  const check = {
-
-    player_id:
-      prop.player_id,
-
-    player:
-      prop.player,
-
-    team:
-      prop.team,
-
-    opponent:
-      prop.opponent,
-
-    game:
-      prop.game,
-
-    position:
-      prop.position,
-
-    prop:
-      prop.prop,
-
-    side,
-
-    line,
-
-    odds,
-
-    projection:
-      Number(
-        prop.projection || 0
-      ),
-
-    median:
-      Number(
-        prop.median || 0
-      ),
-
-    model_probability:
-      modelProbability,
-
-    implied_probability:
-      implied,
-
-    model_difference:
-      edge,
-
-    fair_odds:
-      fairOdds,
-
-    role_score:
-      roleScore,
-
-    role_label:
-      prop.role?.role_label ||
-      "UNKNOWN",
-
-    matchup_score:
-      matchupScore,
-
-    matchup_label:
-      prop.matchup?.matchup_label ||
-      "UNKNOWN",
-
-    screen
-
-  };
-
-  const encoded =
-    encodeURIComponent(
-      JSON.stringify(check)
-    );
-
-  result.innerHTML = `
-
-    <div class="result-head">
-
-      <div>
-
-        <div class="result-title">
-
-          ${escapeHtml(side)}
-
-          ${escapeHtml(
-            prettyProp(
-              prop.prop
-            )
-          )}
-
-          ${line}
-
-        </div>
-
-        <div class="player-meta">
-
-          ${escapeHtml(
-            prop.player
-          )}
-
-          ·
-
-          ${escapeHtml(
-            prop.team
-          )}
-
-          vs
-
-          ${escapeHtml(
-            prop.opponent
-          )}
-
-        </div>
-
-      </div>
-
-      <div
-        class="edge-number ${edgeClass}"
-      >
-
-        ${edge >= 0 ? "+" : ""}
-
-        ${(edge * 100).toFixed(1)}
-
-        pts
-
-      </div>
+      ).join("")}
 
     </div>
 
-    <div class="market-grid">
+    <input
 
-      <div class="market-box">
+      class="search"
 
-        <div class="market-value">
+      placeholder="Search player..."
 
-          ${(modelProbability * 100).toFixed(1)}%
+      value="${esc(SEARCH)}"
 
-        </div>
+      oninput="setSearch(this.value)"
 
-        <div class="market-label">
-          Model Probability
-        </div>
-
-      </div>
-
-      <div class="market-box">
-
-        <div class="market-value">
-
-          ${(implied * 100).toFixed(1)}%
-
-        </div>
-
-        <div class="market-label">
-          Price Implied
-        </div>
-
-      </div>
-
-      <div class="market-box">
-
-        <div class="market-value">
-
-          ${
-            fairOdds !== null
-            ?
-            (
-              fairOdds > 0
-              ?
-              "+" + fairOdds
-              :
-              fairOdds
-            )
-            :
-            "—"
-          }
-
-        </div>
-
-        <div class="market-label">
-          Model Fair Odds
-        </div>
-
-      </div>
-
-      <div class="market-box">
-
-        <div class="market-value">
-
-          ${escapeHtml(
-            screen
-          )}
-
-        </div>
-
-        <div class="market-label">
-          JPro Screen
-        </div>
-
-      </div>
-
-    </div>
-
-    <br>
-
-    <strong>
-      Model interpretation
-    </strong>
-
-    <br>
-
-    The 20K distribution estimates
-    a
-
-    <strong>
-      ${(modelProbability * 100).toFixed(1)}%
-    </strong>
-
-    probability for this exact
-    ${escapeHtml(side.toLowerCase())}
-    at
-    ${line}.
-
-    The entered price
-    (${odds > 0 ? "+" : ""}${odds})
-    implies
-
-    <strong>
-      ${(implied * 100).toFixed(1)}%
-    </strong>.
-
-    <br><br>
-
-    The difference is
-
-    <strong class="${edgeClass}">
-
-      ${edge >= 0 ? "+" : ""}
-
-      ${(edge * 100).toFixed(1)}
-
-      percentage points.
-
-    </strong>
-
-    <br><br>
-
-    Role:
-
-    <strong>
-      ${escapeHtml(
-        prop.role?.role_label ||
-        "UNKNOWN"
-      )}
-
-      ${roleScore.toFixed(1)}
-    </strong>
-
-    <br>
-
-    Matchup:
-
-    <strong>
-      ${escapeHtml(
-        prop.matchup?.matchup_label ||
-        "UNKNOWN"
-      )}
-
-      ${matchupScore.toFixed(1)}
-    </strong>
-
-    <br><br>
-
-    <span style="color:#888;">
-
-      This is a model-vs-price comparison,
-      not a guarantee of the outcome.
-      Market prices can also contain vig,
-      and late availability or workload
-      changes can invalidate pregame assumptions.
-
-    </span>
-
-    <button
-      class="save-button"
-      onclick='saveEncodedCheck(
-        "${encoded}"
-      )'
     >
 
-      SAVE TO JPRO PICKS
+    <div class="sectionTitle">
 
-    </button>
+      <h2>Player Analysis</h2>
+
+      <span>${players.length} PLAYERS</span>
+
+    </div>
 
   `;
 
-  result.classList.add(
-    "show"
-  );
-}
+  for(const player of players){
 
+    const role=roleFor(player);
 
-function saveEncodedCheck(
-  encoded
-) {
+    const matchup=matchupFor(player);
 
-  try {
+    const confidence=confidenceFor(player);
 
-    const check =
-      JSON.parse(
-        decodeURIComponent(
-          encoded
-        )
-      );
+    const td=tdFor(player.player,player.team);
 
-    saveCheck(
-      check
-    );
+    const first=player.props[0]||{};
 
-  }
-  catch (
-    error
-  ) {
+    const status=first.jpro_gameday_v1?.market_readiness||"REVIEW";
 
-    console.error(
-      error
-    );
+    html+=`
 
-  }
-}
+      <div class="card">
 
+        <div class="playerTop">
 
-function showMatchups() {
+          <div>
 
-  currentGame = null;
-  currentPlayerId = null;
+            <div class="playerName">${esc(player.player)}</div>
 
-  setActiveNav(
-    "navMatchups"
-  );
+            <div class="playerMeta">
 
-  const projections = [
-    ...(
-      jproData?.projections ||
-      []
-    )
-  ];
-
-  projections.sort(
-    (a, b) => {
-
-      const scoreA =
-        Number(
-          a.matchup?.matchup_score ||
-          0
-        );
-
-      const scoreB =
-        Number(
-          b.matchup?.matchup_score ||
-          0
-        );
-
-      const roleA =
-        Number(
-          a.role?.role_score ||
-          0
-        );
-
-      const roleB =
-        Number(
-          b.role?.role_score ||
-          0
-        );
-
-      const combinedA =
-        scoreA * .55 +
-        roleA * .45;
-
-      const combinedB =
-        scoreB * .55 +
-        roleB * .45;
-
-      return (
-        combinedB -
-        combinedA
-      );
-    }
-  );
-
-  const top =
-    projections.slice(
-      0,
-      30
-    );
-
-  content.innerHTML = `
-
-    <div class="eyebrow">
-
-      ${escapeHtml(
-        jproData?.slate ||
-        "Current Slate"
-      )}
-
-    </div>
-
-    <h1 class="page-title">
-      Matchups
-    </h1>
-
-    <div class="page-subtitle">
-
-      Player opportunities ranked using
-      role and opponent matchup context.
-      Open any player for the full
-      projection distribution.
-
-    </div>
-
-    ${
-      top.length
-      ?
-      top.map(
-        prop => {
-
-          const matchup =
-            prop.matchup || {};
-
-          const role =
-            prop.role || {};
-
-          return `
-
-            <div
-              class="card player-card tap-card"
-              onclick='showPlayer(
-                ${JSON.stringify(
-                  prop.game
-                )},
-                ${JSON.stringify(
-                  String(
-                    prop.player_id
-                  )
-                )}
-              )'
-            >
-
-              <div class="player-row">
-
-                <div>
-
-                  <div class="player-name">
-
-                    ${escapeHtml(
-                      prop.player
-                    )}
-
-                  </div>
-
-                  <div class="player-meta">
-
-                    ${escapeHtml(
-                      prop.team
-                    )}
-
-                    vs
-
-                    ${escapeHtml(
-                      prop.opponent
-                    )}
-
-                    ·
-
-                    ${escapeHtml(
-                      prettyProp(
-                        prop.prop
-                      )
-                    )}
-
-                  </div>
-
-                </div>
-
-                <div class="score-pill">
-
-                  ${Number(
-                    matchup.matchup_score ||
-                    0
-                  ).toFixed(1)}
-
-                </div>
-
-              </div>
-
-              <div class="prop-context">
-
-                <span class="mini-pill">
-
-                  ROLE
-
-                  ${escapeHtml(
-                    role.role_label ||
-                    "UNKNOWN"
-                  )}
-
-                  ${Number(
-                    role.role_score ||
-                    0
-                  ).toFixed(1)}
-
-                </span>
-
-                <span class="mini-pill">
-
-                  MATCHUP
-
-                  ${escapeHtml(
-                    matchup.matchup_label ||
-                    "UNKNOWN"
-                  )}
-
-                </span>
-
-              </div>
+              ${esc(player.team)} • ${esc(player.position)} • vs ${esc(player.opponent)}
 
             </div>
 
-          `;
+          </div>
 
-        }
-      ).join("")
-      :
-      `
+          <span class="badge ${statusClass(status)}">
 
-        <div class="empty">
-          No matchup data available.
-        </div>
+            ${status==="MODEL_READY"?"MODEL READY":"REVIEW"}
 
-      `
-    }
-
-  `;
-}
-
-
-function getEngineCandidates() {
-
-  const possible = [
-
-    jproData?.jpro_picks_candidates,
-
-    jproData?.picks_candidates,
-
-    jproData?.jpro_picks_engine?.candidates
-
-  ];
-
-  for (
-    const value of possible
-  ) {
-
-    if (
-      Array.isArray(value)
-      &&
-      value.length
-    ) {
-
-      return value;
-
-    }
-
-  }
-
-  return [];
-}
-
-
-function candidateProbability(
-  candidate
-) {
-
-  return Number(
-
-    candidate.model_probability ??
-
-    candidate.probability ??
-
-    candidate.model_prob ??
-
-    0
-
-  );
-}
-
-
-function candidateReference(
-  candidate
-) {
-
-  return Number(
-
-    candidate.reference_line ??
-
-    candidate.model_reference_line ??
-
-    candidate.line ??
-
-    0
-
-  );
-}
-
-
-function showPicks() {
-
-  currentGame = null;
-  currentPlayerId = null;
-
-  setActiveNav(
-    "navPicks"
-  );
-
-  const candidates =
-    getEngineCandidates();
-
-  const saved =
-    getSavedChecks();
-
-  content.innerHTML = `
-
-    <div class="eyebrow">
-      JPro Decision Layer
-    </div>
-
-    <h1 class="page-title">
-      JPro Picks
-    </h1>
-
-    <div class="page-subtitle">
-
-      Model candidates are generated from
-      the JPro screening engine.
-
-      Saved line checks use the exact
-      sportsbook line, side and price
-      you entered on this device.
-
-    </div>
-
-    ${
-      saved.length
-      ?
-      `
-
-        <div class="section-title">
-          Saved Market Checks
-        </div>
-
-        ${saved.map(
-          (pick, index) =>
-            renderSavedPick(
-              pick,
-              index
-            )
-        ).join("")}
-
-      `
-      :
-      `
-
-        <div class="empty">
-
-          You have not saved a sportsbook
-          line check yet.
-
-          <br><br>
-
-          Open a player, choose a prop,
-          select OVER or UNDER, enter the
-          exact sportsbook line and price,
-          then save the evaluation here.
+          </span>
 
         </div>
 
-      `
-    }
+        <div class="propGrid">
 
-    <div class="section-title">
-      Model Candidates
-    </div>
+          <div class="metric">
 
-    ${
-      candidates.length
-      ?
-      candidates
-        .slice(
-          0,
-          30
-        )
-        .map(
-          (candidate, index) =>
-            renderCandidate(
-              candidate,
-              index
-            )
-        )
-        .join("")
-      :
-      `
+            <small>ROLE</small>
 
-        <div class="empty">
-
-          The Picks Engine is active,
-          but no candidate array was
-          found in the currently loaded
-          JSON.
-
-          <br><br>
-
-          Your sportsbook line checks
-          still work directly from each
-          player's stored 20,000-outcome
-          distribution.
-
-        </div>
-
-      `
-    }
-
-  `;
-}
-
-
-function renderSavedPick(
-  pick,
-  index
-) {
-
-  const edge =
-    Number(
-      pick.model_difference ||
-      0
-    );
-
-  const edgeClass =
-    edge > 0
-    ?
-    "positive"
-    :
-    edge < 0
-    ?
-    "negative"
-    :
-    "neutral";
-
-  return `
-
-    <div class="card pick-card">
-
-      <div class="pick-top">
-
-        <div>
-
-          <div class="pick-number">
-
-            SAVED CHECK
-            #${index + 1}
+            <strong>${n(role.score,0)}</strong>
 
           </div>
 
-          <div class="pick-player">
+          <div class="metric">
 
-            ${escapeHtml(
-              pick.player
-            )}
+            <small>MATCHUP</small>
 
-          </div>
-
-          <div class="player-meta">
-
-            ${escapeHtml(
-              pick.team
-            )}
-
-            vs
-
-            ${escapeHtml(
-              pick.opponent
-            )}
+            <strong>${n(matchup.score,0)}</strong>
 
           </div>
 
-          <div class="pick-side">
+          <div class="metric">
 
-            ${escapeHtml(
-              pick.side
-            )}
+            <small>ATTD</small>
 
-            ${escapeHtml(
-              prettyProp(
-                pick.prop
-              )
-            )}
-
-            ${pick.line}
-
-            @
-
-            ${
-              Number(
-                pick.odds
-              ) > 0
-              ?
-              "+"
-              :
-              ""
-            }
-
-            ${pick.odds}
+            <strong>${td?pct(td.anytime_td_probability_pct):"—"}</strong>
 
           </div>
 
         </div>
 
-        <div class="priority">
+        <button class="openBtn" onclick='openPlayer(${JSON.stringify(player.team)},${JSON.stringify(player.player)})'>
 
-          ${escapeHtml(
-            pick.screen ||
-            "CHECK"
-          )}
+          OPEN PLAYER ANALYSIS
 
-        </div>
-
-      </div>
-
-      <div class="candidate-grid">
-
-        <div class="candidate-box">
-
-          <div class="candidate-value">
-
-            ${(
-              Number(
-                pick.model_probability ||
-                0
-              ) * 100
-            ).toFixed(1)}%
-
-          </div>
-
-          <div class="candidate-label">
-            Model
-          </div>
-
-        </div>
-
-        <div class="candidate-box">
-
-          <div class="candidate-value">
-
-            ${(
-              Number(
-                pick.implied_probability ||
-                0
-              ) * 100
-            ).toFixed(1)}%
-
-          </div>
-
-          <div class="candidate-label">
-            Implied
-          </div>
-
-        </div>
-
-        <div class="candidate-box">
-
-          <div
-            class="candidate-value ${edgeClass}"
-          >
-
-            ${edge >= 0 ? "+" : ""}
-
-            ${(edge * 100).toFixed(1)}
-
-          </div>
-
-          <div class="candidate-label">
-            Difference
-          </div>
-
-        </div>
-
-      </div>
-
-      <div class="prop-context">
-
-        <span class="mini-pill">
-
-          ROLE
-
-          ${escapeHtml(
-            pick.role_label ||
-            "UNKNOWN"
-          )}
-
-          ${Number(
-            pick.role_score ||
-            0
-          ).toFixed(1)}
-
-        </span>
-
-        <span class="mini-pill">
-
-          MATCHUP
-
-          ${escapeHtml(
-            pick.matchup_label ||
-            "UNKNOWN"
-          )}
-
-          ${Number(
-            pick.matchup_score ||
-            0
-          ).toFixed(1)}
-
-        </span>
-
-      </div>
-
-    </div>
-
-  `;
-}
-
-
-function renderCandidate(
-  candidate,
-  index
-) {
-
-  const player =
-    candidate.player ||
-    candidate.player_name ||
-    "Unknown";
-
-  const team =
-    candidate.team ||
-    "";
-
-  const opponent =
-    candidate.opponent ||
-    "";
-
-  const prop =
-    candidate.prop ||
-    candidate.prop_type ||
-    "";
-
-  const side =
-    candidate.side ||
-    candidate.model_side ||
-    "";
-
-  const probability =
-    candidateProbability(
-      candidate
-    );
-
-  const reference =
-    candidateReference(
-      candidate
-    );
-
-  const projection =
-    Number(
-      candidate.projection ||
-      0
-    );
-
-  const score =
-    Number(
-      candidate.score ||
-      candidate.candidate_score ||
-      0
-    );
-
-  const roleScore =
-    Number(
-      candidate.role_score ||
-      0
-    );
-
-  const matchupScore =
-    Number(
-      candidate.matchup_score ||
-      0
-    );
-
-  const screen =
-    candidate.screen ||
-    candidate.status ||
-    "MODEL CANDIDATE";
-
-  return `
-
-    <div class="card pick-card">
-
-      <div class="pick-top">
-
-        <div>
-
-          <div class="pick-number">
-
-            MODEL CANDIDATE
-            #${index + 1}
-
-          </div>
-
-          <div class="pick-player">
-
-            ${escapeHtml(
-              player
-            )}
-
-          </div>
-
-          <div class="player-meta">
-
-            ${escapeHtml(
-              team
-            )}
-
-            ${opponent ? "vs" : ""}
-
-            ${escapeHtml(
-              opponent
-            )}
-
-          </div>
-
-          <div class="pick-side">
-
-            ${escapeHtml(
-              side
-            )}
-
-            ${escapeHtml(
-              prettyProp(
-                prop
-              )
-            )}
-
-            ${reference}
-
-          </div>
-
-        </div>
-
-        <div class="priority">
-
-          ${escapeHtml(
-            screen
-          )}
-
-        </div>
-
-      </div>
-
-      <div class="candidate-grid">
-
-        <div class="candidate-box">
-
-          <div class="candidate-value">
-
-            ${(
-              probability *
-              100
-            ).toFixed(1)}%
-
-          </div>
-
-          <div class="candidate-label">
-            Model Prob
-          </div>
-
-        </div>
-
-        <div class="candidate-box">
-
-          <div class="candidate-value">
-
-            ${projection.toFixed(1)}
-
-          </div>
-
-          <div class="candidate-label">
-            Projection
-          </div>
-
-        </div>
-
-        <div class="candidate-box">
-
-          <div class="candidate-value">
-
-            ${score.toFixed(1)}
-
-          </div>
-
-          <div class="candidate-label">
-            Screen Score
-          </div>
-
-        </div>
-
-      </div>
-
-      <div class="prop-context">
-
-        <span class="mini-pill">
-
-          ROLE
-          ${roleScore.toFixed(1)}
-
-        </span>
-
-        <span class="mini-pill">
-
-          MATCHUP
-          ${matchupScore.toFixed(1)}
-
-        </span>
-
-      </div>
-
-      <div
-        class="analysis-copy"
-        style="margin-top:13px;"
-      >
-
-        This is a model screening candidate,
-        not a qualified sportsbook wager.
-
-        Enter the actual sportsbook line
-        and price on the player's page
-        before evaluating the market.
-
-      </div>
-
-    </div>
-
-  `;
-}
-
-
-async function loadJPro() {
-
-  try {
-
-    const response =
-      await fetch(
-
-        `data/jpro-current-projections.json?v=${Date.now()}`,
-
-        {
-          cache:
-            "no-store"
-        }
-
-      );
-
-    if (
-      !response.ok
-    ) {
-
-      throw new Error(
-        `HTTP ${response.status}`
-      );
-
-    }
-
-    jproData =
-      await response.json();
-
-    const badge =
-      document.getElementById(
-        "engineBadge"
-      );
-
-    if (
-      jproData.picks_engine_ready
-      ||
-      jproData.jpro_picks_engine
-    ) {
-
-      badge.textContent =
-        "JPRO PICKS V1";
-
-    }
-    else if (
-      jproData.matchup_intelligence
-      &&
-      jproData.role_intelligence
-    ) {
-
-      badge.textContent =
-        "JPRO INTELLIGENCE";
-
-    }
-    else {
-
-      badge.textContent =
-        "20K ENGINE";
-
-    }
-
-    showGames();
-
-  }
-  catch (
-    error
-  ) {
-
-    console.error(
-      error
-    );
-
-    content.innerHTML = `
-
-      <div class="eyebrow">
-        JPro
-      </div>
-
-      <h1 class="page-title">
-        Engine Offline
-      </h1>
-
-      <div class="page-subtitle">
-
-        The latest JPro data
-        could not be loaded.
-
-      </div>
-
-      <div class="empty">
-
-        Refresh the app after
-        the GitHub workflow has
-        finished publishing the
-        latest JSON.
+        </button>
 
       </div>
 
     `;
 
   }
+
+  $("app").innerHTML=html;
+
 }
 
+function renderTD(){
 
-if (
-  "serviceWorker" in navigator
-) {
+  let board=[...TD_BOARD];
 
-  window.addEventListener(
-    "load",
-    () => {
+  board.sort((a,b)=>
 
-      navigator
-        .serviceWorker
-        .register(
-          "sw.js"
-        )
-        .catch(
-          error =>
-            console.log(
-              "SW:",
-              error
-            )
-        );
+    Number(b.anytime_td_probability||0)-Number(a.anytime_td_probability||0)
 
-    }
   );
 
+  let html=header()+tabs()+`
+
+    <div class="sectionTitle">
+
+      <h2>Anytime TD Board</h2>
+
+      <span>TD V1.1 • EXPERIMENTAL</span>
+
+    </div>
+
+    <div class="warning">
+
+      Ranked by JPro model probability, not by recommendation.
+
+      Compare each probability with the actual sportsbook price before evaluating a market.
+
+    </div>
+
+  `;
+
+  board.forEach((x,i)=>{
+
+    html+=`
+
+      <div class="card" onclick='openPlayer(${JSON.stringify(x.team)},${JSON.stringify(x.player)})'>
+
+        <div class="tdRank">
+
+          <div class="tdRankLeft">
+
+            <div class="rank">#${i+1}</div>
+
+            <div>
+
+              <div class="playerName">${esc(x.player)}</div>
+
+              <div class="playerMeta">
+
+                ${esc(x.team)} • ${esc(x.position)} •
+
+                ${esc(x.confidence)} CONFIDENCE
+
+              </div>
+
+            </div>
+
+          </div>
+
+          <div>
+
+            <div class="tdPct">${pct(x.anytime_td_probability_pct)}</div>
+
+            <div class="tdOdds">FAIR ${odds(x.anytime_fair_odds)}</div>
+
+          </div>
+
+        </div>
+
+        <div class="propGrid">
+
+          <div class="metric">
+
+            <small>2+ TD</small>
+
+            <strong>${pct(x.two_plus_td_probability_pct)}</strong>
+
+          </div>
+
+          <div class="metric">
+
+            <small>ROLE</small>
+
+            <strong>${n(x.role_score,0)}</strong>
+
+          </div>
+
+          <div class="metric">
+
+            <small>MATCHUP</small>
+
+            <strong>${n(x.matchup_score,0)}</strong>
+
+          </div>
+
+        </div>
+
+      </div>
+
+    `;
+
+  });
+
+  html+=`
+
+    <div class="note">
+
+      TD V1.1 uses historical touchdown rates with sample shrinkage plus conservative
+
+      Role V2 and matchup adjustments. It does not yet contain separately validated
+
+      red-zone or goal-line play-by-play features.
+
+    </div>
+
+  `;
+
+  $("app").innerHTML=html;
+
 }
 
+function openPlayer(team,name){
 
-loadJPro();
+  const player=uniquePlayers().find(p=>p.team===team&&p.player===name);
+
+  if(!player)return;
+
+  CURRENT_PLAYER=player;
+
+  CURRENT_PROP_INDEX=0;
+
+  PAGE="detail";
+
+  renderPlayerDetail();
+
+  window.scrollTo(0,0);
+
+}
+
+function renderPlayerDetail(){
+
+  const player=CURRENT_PLAYER;
+
+  if(!player)return;
+
+  const props=player.props;
+
+  const prop=props[CURRENT_PROP_INDEX]||props[0];
+
+  const analysis=prop.player_analysis_v1||prop.player_analysis||{};
+
+  const role=analysis.expected_role||{};
+
+  const matchup=analysis.matchup_intelligence||{};
+
+  const confidence=analysis.projection_confidence||{};
+
+  const dist=analysis.distribution||{};
+
+  const td=tdFor(player.player,player.team);
+
+  let html=`
+
+    <div class="header">
+
+      <div class="logo">JPRO <span>MODEL</span></div>
+
+      <div class="engine">PLAYER INTELLIGENCE</div>
+
+    </div>
+
+    <button class="back" onclick="backToPlayers()">← BACK TO PLAYERS</button>
+
+    <div class="bigName">${esc(player.player)}</div>
+
+    <div class="sub">
+
+      ${esc(player.team)} • ${esc(player.position)} • vs ${esc(player.opponent)}
+
+    </div>
+
+    <div class="propSelector">
+
+      ${props.map((p,i)=>`
+
+        <button
+
+          class="propChip ${i===CURRENT_PROP_INDEX?"active":""}"
+
+          onclick="selectProp(${i})"
+
+        >
+
+          ${esc(formatProp(p.prop))}
+
+        </button>
+
+      `).join("")}
+
+    </div>
+
+    <div class="analysisCard">
+
+      <h3>JPRO PROJECTION — ${esc(formatProp(prop.prop))}</h3>
+
+      <div class="projectionHero">
+
+        <div class="projMain">
+
+          <small>MODEL PROJECTION</small>
+
+          <strong>${n(analysis.gameday_projection??prop.projection,1)}</strong>
+
+        </div>
+
+        <div class="projMain">
+
+          <small>CONFIDENCE</small>
+
+          <strong style="font-size:20px">${esc(confidence.label||"—")}</strong>
+
+          <div class="sub">${n(confidence.score,0)}/100 evidence</div>
+
+        </div>
+
+      </div>
+
+      <div class="range">
+
+        <div><small>P10</small><strong>${n(dist.p10,0)}</strong></div>
+
+        <div><small>P25</small><strong>${n(dist.p25,0)}</strong></div>
+
+        <div><small>MED</small><strong>${n(dist.median,0)}</strong></div>
+
+        <div><small>P75</small><strong>${n(dist.p75,0)}</strong></div>
+
+        <div><small>P90</small><strong>${n(dist.p90,0)}</strong></div>
+
+      </div>
+
+    </div>
+
+    <div class="analysisCard">
+
+      <h3>WHY JPRO PROJECTS THIS</h3>
+
+      ${
+
+        Array.isArray(analysis.why_jpro_projects_this)
+
+        ? `<ul>${analysis.why_jpro_projects_this.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`
+
+        : `<p>No explanation available.</p>`
+
+      }
+
+    </div>
+
+    <div class="analysisCard">
+
+      <h3>ROLE + MATCHUP</h3>
+
+      <div class="propGrid">
+
+        <div class="metric">
+
+          <small>ROLE</small>
+
+          <strong>${n(role.score,1)}</strong>
+
+          <div class="sub">${esc(role.label||"—")}</div>
+
+        </div>
+
+        <div class="metric">
+
+          <small>MATCHUP</small>
+
+          <strong>${n(matchup.score,1)}</strong>
+
+          <div class="sub">${esc(matchup.label||"—")}</div>
+
+        </div>
+
+        <div class="metric">
+
+          <small>SIMS</small>
+
+          <strong>${Number(analysis.simulation_count||0).toLocaleString()}</strong>
+
+        </div>
+
+      </div>
+
+    </div>
+
+  `;
+
+  if(td){
+
+    const tda=td.td_analysis||{};
+
+    html+=`
+
+      <div class="analysisCard">
+
+        <h3>TOUCHDOWN MODEL <span class="badge review">EXPERIMENTAL V1.1</span></h3>
+
+        <div class="tdHero">
+
+          <div class="tdBox">
+
+            <small>ANYTIME TD</small>
+
+            <strong>${pct(td.anytime_td_probability_pct)}</strong>
+
+            <span>Fair odds ${odds(td.anytime_fair_odds)}</span>
+
+          </div>
+
+          <div class="tdBox">
+
+            <small>2+ TOUCHDOWNS</small>
+
+            <strong>${pct(td.two_plus_td_probability_pct)}</strong>
+
+            <span>Fair odds ${odds(td.two_plus_fair_odds)}</span>
+
+          </div>
+
+        </div>
+
+        <div class="propGrid">
+
+          <div class="metric">
+
+            <small>TD CONF.</small>
+
+            <strong>${esc(td.confidence||"—")}</strong>
+
+          </div>
+
+          <div class="metric">
+
+            <small>ROLE</small>
+
+            <strong>${n(td.role_score,0)}</strong>
+
+          </div>
+
+          <div class="metric">
+
+            <small>STATUS</small>
+
+            <strong style="font-size:10px">${td.status==="MODEL_READY"?"READY":"REVIEW"}</strong>
+
+          </div>
+
+        </div>
+
+        ${
+
+          Array.isArray(tda.why_jpro)
+
+          ? `<ul>${tda.why_jpro.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`
+
+          : ""
+
+        }
+
+      </div>
+
+      ${tdMarketCalculator(td)}
+
+    `;
+
+  }
+
+  html+=yardageCalculator(prop);
+
+  html+=`
+
+    <div class="analysisCard">
+
+      <h3>DATA USED</h3>
+
+      ${
+
+        Array.isArray(analysis.data_used)
+
+        ? `<ul>${analysis.data_used.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`
+
+        : ""
+
+      }
+
+    </div>
+
+    <div class="analysisCard">
+
+      <h3>RISK FACTORS</h3>
+
+      ${
+
+        Array.isArray(analysis.risk_factors)
+
+        ? `<ul>${analysis.risk_factors.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`
+
+        : ""
+
+      }
+
+      ${
+
+        td?.td_analysis?.risk_factors
+
+        ? `<ul>${td.td_analysis.risk_factors.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`
+
+        : ""
+
+      }
+
+    </div>
+
+    <div class="note">
+
+      JPro projections and probabilities are model estimates, not guarantees.
+
+      Gameday personnel changes can make historical data less representative.
+
+    </div>
+
+  `;
+
+  $("app").innerHTML=html;
+
+}
+
+function tdMarketCalculator(td){
+
+  return `
+
+    <div class="market">
+
+      <h3>TD Market Comparison</h3>
+
+      <div class="marketIntro">
+
+        Enter the odds you're actually seeing at your sportsbook.
+
+      </div>
+
+      <label class="fieldLabel">MARKET</label>
+
+      <select id="tdMarketType">
+
+        <option value="ATTD">Anytime TD</option>
+
+        <option value="2TD">2+ Touchdowns</option>
+
+      </select>
+
+      <label class="fieldLabel">AMERICAN ODDS</label>
+
+      <input id="tdOdds" inputmode="numeric" placeholder="Example: +175 or -105">
+
+      <button class="calcBtn" onclick="calculateTDMarket()">COMPARE WITH JPRO</button>
+
+      <div class="result" id="tdResult"></div>
+
+    </div>
+
+  `;
+
+}
+
+function calculateTDMarket(){
+
+  const td=tdFor(CURRENT_PLAYER.player,CURRENT_PLAYER.team);
+
+  if(!td)return;
+
+  const type=$("tdMarketType").value;
+
+  const price=Number($("tdOdds").value);
+
+  if(!Number.isFinite(price)||price===0){
+
+    alert("Enter valid American odds.");
+
+    return;
+
+  }
+
+  const modelProb=
+
+    type==="ATTD"
+
+      ? Number(td.anytime_td_probability)
+
+      : Number(td.two_plus_td_probability);
+
+  const fair=
+
+    type==="ATTD"
+
+      ? td.anytime_fair_odds
+
+      : td.two_plus_fair_odds;
+
+  const implied=americanToProb(price);
+
+  const diff=modelProb-implied;
+
+  let screen="NO EDGE";
+
+  let cls="no";
+
+  if(diff>=.05){
+
+    screen="JPRO SCREEN PASS";
+
+    cls="pass";
+
+  }else if(diff>=.015){
+
+    screen="JPRO REVIEW";
+
+    cls="review";
+
+  }
+
+  const el=$("tdResult");
+
+  el.innerHTML=`
+
+    <div class="resultGrid">
+
+      <div class="resultMetric">
+
+        <small>JPRO PROBABILITY</small>
+
+        <strong>${pct(modelProb*100)}</strong>
+
+      </div>
+
+      <div class="resultMetric">
+
+        <small>MARKET IMPLIED</small>
+
+        <strong>${pct(implied*100)}</strong>
+
+      </div>
+
+      <div class="resultMetric">
+
+        <small>JPRO FAIR ODDS</small>
+
+        <strong>${odds(fair)}</strong>
+
+      </div>
+
+      <div class="resultMetric">
+
+        <small>DIFFERENCE</small>
+
+        <strong>${diff>=0?"+":""}${(diff*100).toFixed(1)} pts</strong>
+
+      </div>
+
+    </div>
+
+    <div class="screen ${cls}">${screen}</div>
+
+    <button class="openBtn" onclick="savePick('TD','${type}',${price},${modelProb})">
+
+      SAVE TO MY PICKS
+
+    </button>
+
+    <div class="note">
+
+      TD V1.1 is experimental and has not yet been separately market-calibrated.
+
+      PASS means the model probability exceeds the raw implied probability by the
+
+      current screening threshold; it does not guarantee the outcome.
+
+    </div>
+
+  `;
+
+  el.classList.add("show");
+
+}
+
+function yardageCalculator(prop){
+
+  return `
+
+    <div class="market">
+
+      <h3>${esc(formatProp(prop.prop))} Market Comparison</h3>
+
+      <div class="marketIntro">
+
+        Uses this player's existing 20,000-outcome simulation distribution.
+
+      </div>
+
+      <label class="fieldLabel">SPORTSBOOK LINE</label>
+
+      <input id="yardLine" type="number" step=".5" inputmode="decimal" placeholder="Example: 74.5">
+
+      <div class="marketGrid">
+
+        <div>
+
+          <label class="fieldLabel">SIDE</label>
+
+          <select id="yardSide">
+
+            <option value="OVER">Over</option>
+
+            <option value="UNDER">Under</option>
+
+          </select>
+
+        </div>
+
+        <div>
+
+          <label class="fieldLabel">ODDS</label>
+
+          <input id="yardOdds" inputmode="numeric" placeholder="-110">
+
+        </div>
+
+      </div>
+
+      <button class="calcBtn" onclick="calculateYardageMarket()">COMPARE WITH JPRO</button>
+
+      <div class="result" id="yardResult"></div>
+
+    </div>
+
+  `;
+
+}
+
+function calculateYardageMarket(){
+
+  const prop=CURRENT_PLAYER.props[CURRENT_PROP_INDEX];
+
+  const line=Number($("yardLine").value);
+
+  const side=$("yardSide").value;
+
+  const price=Number($("yardOdds").value);
+
+  if(!Number.isFinite(line)){
+
+    alert("Enter a sportsbook line.");
+
+    return;
+
+  }
+
+  if(!Number.isFinite(price)||price===0){
+
+    alert("Enter valid American odds.");
+
+    return;
+
+  }
+
+  const modelProb=histProbability(
+
+    prop.simulation_histogram,
+
+    line,
+
+    side
+
+  );
+
+  if(modelProb===null){
+
+    alert("20K simulation distribution unavailable.");
+
+    return;
+
+  }
+
+  const implied=americanToProb(price);
+
+  const diff=modelProb-implied;
+
+  const fair=probToAmerican(modelProb);
+
+  let screen="NO EDGE";
+
+  let cls="no";
+
+  if(diff>=.05){
+
+    screen="JPRO SCREEN PASS";
+
+    cls="pass";
+
+  }else if(diff>=.015){
+
+    screen="JPRO REVIEW";
+
+    cls="review";
+
+  }
+
+  const availabilitySensitive=
+
+    !!prop.jpro_gameday_v1?.availability_sensitive;
+
+  if(availabilitySensitive && screen==="JPRO SCREEN PASS"){
+
+    screen="JPRO PASS — GAMEDAY REVIEW";
+
+    cls="review";
+
+  }
+
+  const el=$("yardResult");
+
+  el.innerHTML=`
+
+    <div class="resultGrid">
+
+      <div class="resultMetric">
+
+        <small>MODEL HIT RATE</small>
+
+        <strong>${pct(modelProb*100)}</strong>
+
+      </div>
+
+      <div class="resultMetric">
+
+        <small>MARKET IMPLIED</small>
+
+        <strong>${pct(implied*100)}</strong>
+
+      </div>
+
+      <div class="resultMetric">
+
+        <small>MODEL FAIR ODDS</small>
+
+        <strong>${odds(fair)}</strong>
+
+      </div>
+
+      <div class="resultMetric">
+
+        <small>DIFFERENCE</small>
+
+        <strong>${diff>=0?"+":""}${(diff*100).toFixed(1)} pts</strong>
+
+      </div>
+
+    </div>
+
+    <div class="screen ${cls}">${screen}</div>
+
+    <button
+
+      class="openBtn"
+
+      onclick="savePick('PROP','${side}',${price},${modelProb},${line})"
+
+    >
+
+      SAVE TO MY PICKS
+
+    </button>
+
+    ${
+
+      availabilitySensitive
+
+      ? `<div class="note">
+
+           This market is availability-sensitive. The baseline 20K distribution was
+
+           preserved rather than applying an unvalidated injury redistribution.
+
+         </div>`
+
+      : ""
+
+    }
+
+  `;
+
+  el.classList.add("show");
+
+}
+
+function savePick(type,side,price,modelProb,line=null){
+
+  const prop=CURRENT_PLAYER.props[CURRENT_PROP_INDEX];
+
+  const picks=JSON.parse(localStorage.getItem("jpro_gameday_picks")||"[]");
+
+  picks.push({
+
+    id:Date.now(),
+
+    player:CURRENT_PLAYER.player,
+
+    team:CURRENT_PLAYER.team,
+
+    type,
+
+    prop:type==="TD" ? side : prop.prop,
+
+    side:type==="TD" ? null : side,
+
+    line,
+
+    odds:price,
+
+    modelProbability:modelProb,
+
+    savedAt:new Date().toISOString()
+
+  });
+
+  localStorage.setItem("jpro_gameday_picks",JSON.stringify(picks));
+
+  alert("Saved to My Picks.");
+
+}
+
+function renderPicks(){
+
+  const picks=JSON.parse(localStorage.getItem("jpro_gameday_picks")||"[]");
+
+  let html=header()+tabs()+`
+
+    <div class="sectionTitle">
+
+      <h2>My Picks</h2>
+
+      <span>${picks.length} SAVED</span>
+
+    </div>
+
+  `;
+
+  if(!picks.length){
+
+    html+=`
+
+      <div class="empty">
+
+        Nothing saved yet.<br><br>
+
+        Open a player, compare the actual sportsbook price,
+
+        then save markets you want to track.
+
+      </div>
+
+    `;
+
+  }
+
+  picks.slice().reverse().forEach(p=>{
+
+    html+=`
+
+      <div class="card">
+
+        <div class="playerTop">
+
+          <div>
+
+            <div class="playerName">${esc(p.player)}</div>
+
+            <div class="playerMeta">${esc(p.team)} • ${esc(formatProp(p.prop))}</div>
+
+          </div>
+
+          <span class="badge">${odds(p.odds)}</span>
+
+        </div>
+
+        <div class="propGrid">
+
+          <div class="metric">
+
+            <small>SIDE</small>
+
+            <strong>${esc(p.side||p.prop)}</strong>
+
+          </div>
+
+          <div class="metric">
+
+            <small>LINE</small>
+
+            <strong>${p.line??"—"}</strong>
+
+          </div>
+
+          <div class="metric">
+
+            <small>MODEL</small>
+
+            <strong>${pct(Number(p.modelProbability)*100)}</strong>
+
+          </div>
+
+        </div>
+
+        <button class="openBtn" onclick="deletePick(${p.id})">REMOVE</button>
+
+      </div>
+
+    `;
+
+  });
+
+  $("app").innerHTML=html;
+
+}
+
+function deletePick(id){
+
+  let picks=JSON.parse(localStorage.getItem("jpro_gameday_picks")||"[]");
+
+  picks=picks.filter(x=>x.id!==id);
+
+  localStorage.setItem("jpro_gameday_picks",JSON.stringify(picks));
+
+  renderPicks();
+
+}
+
+function formatProp(v){
+
+  if(!v)return "PROP";
+
+  const map={
+
+    passing_yards:"Passing Yards",
+
+    rushing_yards:"Rushing Yards",
+
+    receiving_yards:"Receiving Yards",
+
+    receptions:"Receptions"
+
+  };
+
+  return map[v] || String(v)
+
+    .replaceAll("_"," ")
+
+    .replace(/\b\w/g,x=>x.toUpperCase());
+
+}
+
+function setFilter(v){
+
+  FILTER=v;
+
+  renderPlayers();
+
+}
+
+function setSearch(v){
+
+  SEARCH=v;
+
+  renderPlayers();
+
+}
+
+function selectProp(i){
+
+  CURRENT_PROP_INDEX=i;
+
+  renderPlayerDetail();
+
+}
+
+function backToPlayers(){
+
+  PAGE="players";
+
+  CURRENT_PLAYER=null;
+
+  render();
+
+  window.scrollTo(0,0);
+
+}
+
+function showPage(page){
+
+  PAGE=page;
+
+  CURRENT_PLAYER=null;
+
+  render();
+
+  window.scrollTo(0,0);
+
+}
+
+function updateNav(){
+
+  ["Players","TD","Picks"].forEach(x=>{
+
+    const el=$(`nav${x}`);
+
+    if(el)el.classList.remove("active");
+
+  });
+
+  if(PAGE==="players"||PAGE==="detail"){
+
+    $("navPlayers")?.classList.add("active");
+
+  }
+
+  if(PAGE==="td"){
+
+    $("navTD")?.classList.add("active");
+
+  }
+
+  if(PAGE==="picks"){
+
+    $("navPicks")?.classList.add("active");
+
+  }
+
+}
+
+function render(){
+
+  if(PAGE==="players")renderPlayers();
+
+  else if(PAGE==="td")renderTD();
+
+  else if(PAGE==="picks")renderPicks();
+
+  else if(PAGE==="detail")renderPlayerDetail();
+
+  updateNav();
+
+}
+
+async function load(){
+
+  try{
+
+    const res=await fetch(
+
+      `data/jpro-current-projections.json?v=${Date.now()}`,
+
+      {cache:"no-store"}
+
+    );
+
+    if(!res.ok){
+
+      throw new Error(`HTTP ${res.status}`);
+
+    }
+
+    DATA=await res.json();
+
+    const projections=Array.isArray(DATA.projections)
+
+      ? DATA.projections
+
+      : [];
+
+    GAME_ROWS=projections.filter(p=>
+
+      p.jpro_gameday_v1 &&
+
+      p.jpro_gameday_v1.engine==="JPRO_GAMEDAY_ENGINE_V1"
+
+    );
+
+    TD_BOARD=Array.isArray(DATA.jpro_td_board)
+
+      ? DATA.jpro_td_board
+
+      : [];
+
+    if(!GAME_ROWS.length){
+
+      throw new Error("No Eagles/Bears gameday rows found.");
+
+    }
+
+    render();
+
+  }catch(err){
+
+    $("app").innerHTML=`
+
+      <div class="header">
+
+        <div class="logo">JPRO <span>MODEL</span></div>
+
+      </div>
+
+      <div class="empty">
+
+        <strong>Gameday data failed to load.</strong><br><br>
+
+        ${esc(err.message)}
+
+      </div>
+
+    `;
+
+  }
+
+}
+
+load();
 
 </script>
 
 </body>
+
 </html>
